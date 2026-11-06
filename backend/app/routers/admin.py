@@ -71,13 +71,14 @@ def reassign_case_endpoint(
     payload: ReassignCaseRequest,
     db: Annotated[Session, Depends(get_db)],
     admin_user: Annotated[User, Depends(get_current_admin)],
-) -> dict[str, int]:
+) -> dict[str, int | str]:
     """Reassign a case and its originating lead to another firm."""
     case = reassign_case(db, case_id, payload.target_firm_id, admin_user)
     return {
         "id": case.id,
         "lead_id": case.lead_id,
         "assigned_firm_id": case.assigned_firm_id,
+        "status": case.status.value,
     }
 
 

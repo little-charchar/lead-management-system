@@ -65,7 +65,9 @@ def list_leads(
     statement = select(Lead).options(
         selectinload(Lead.plaintiff),
         selectinload(Lead.assigned_firm),
-        selectinload(Lead.attachments).selectinload(LeadAttachment.uploaded_by),
+        selectinload(Lead.attachments)
+        .selectinload(LeadAttachment.uploaded_by)
+        .selectinload(User.law_firm),
     )
     if assigned_firm_id is not None and current_user.role != UserRole.ADMIN:
         raise HTTPException(

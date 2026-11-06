@@ -49,6 +49,14 @@ export interface Lead {
   attachments: LeadAttachment[];
 }
 
+export interface DocumentUploader {
+  id: number;
+  name: string;
+  role: UserRole;
+  law_firm_id: number | null;
+  law_firm_name: string | null;
+}
+
 export interface LeadAttachment {
   id: number;
   lead_id: number;
@@ -57,7 +65,7 @@ export interface LeadAttachment {
   file_size_bytes: number;
   mime_type: string;
   created_at: string;
-  uploader?: UserSummary | null;
+  uploader?: DocumentUploader | null;
 }
 
 export interface DocumentRecord {
@@ -68,7 +76,7 @@ export interface DocumentRecord {
   file_size_bytes: number;
   mime_type: string;
   created_at: string;
-  uploader?: UserSummary | null;
+  uploader?: DocumentUploader | null;
 }
 
 export interface PrivateNote {
@@ -285,12 +293,24 @@ export const api = {
   } = {}) =>
     requestPage<Lead>(`/leads${queryString(filters)}`),
 
-  fetchInbox: (filters: { search?: string; offset?: number; limit?: number } = {}) =>
+  fetchInbox: (filters: {
+    search?: string;
+    category?: string;
+    region?: string;
+    offset?: number;
+    limit?: number;
+  } = {}) =>
     request<Lead[]>(
       `/leads${queryString({ status: "PENDING_REVIEW", ...filters })}`,
     ),
 
-  fetchInboxPage: (filters: { search?: string; offset?: number; limit?: number } = {}) =>
+  fetchInboxPage: (filters: {
+    search?: string;
+    category?: string;
+    region?: string;
+    offset?: number;
+    limit?: number;
+  } = {}) =>
     requestPage<Lead>(
       `/leads${queryString({ status: "PENDING_REVIEW", ...filters })}`,
     ),
@@ -420,7 +440,12 @@ export const api = {
     }),
 
   reassignCase: (caseId: number, targetFirmId: number) =>
-    request<{ id: number; lead_id: number; assigned_firm_id: number }>(
+    request<{
+      id: number;
+      lead_id: number;
+      assigned_firm_id: number;
+      status: CaseStatus;
+    }>(
       `/admin/cases/${caseId}/reassign`,
       {
         method: "POST",

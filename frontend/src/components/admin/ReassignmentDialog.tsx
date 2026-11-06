@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { AlertTriangle, ArrowRightLeft, X } from "lucide-react";
 
-import { api, type ApiError, type LawFirm, type Lead } from "@/lib/api";
+import { api, type ApiError, type CaseRecord, type LawFirm, type Lead } from "@/lib/api";
 import { Button, InlineMessage } from "@/components/ui";
 import { FirmPicker } from "@/components/admin/FirmPicker";
 
@@ -21,7 +22,9 @@ export function ReassignmentDialog({
   const [targetId, setTargetId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!lead) return null;
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!lead || !mounted) return null;
   const selectedLead = lead;
 
   async function submit() {
@@ -39,8 +42,8 @@ export function ReassignmentDialog({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#10231fcc] p-4 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex h-dvh w-screen items-center justify-center overflow-y-auto bg-[#10231fcc] p-4 backdrop-blur-sm">
       <section
         role="dialog"
         aria-modal="true"
@@ -56,7 +59,7 @@ export function ReassignmentDialog({
           </button>
         </div>
         <p className="mt-5 text-[10px] font-bold uppercase tracking-[.16em] text-forest">
-          Lead #{lead.id} · {lead.status.replaceAll("_", " ")}
+          {lead.title} · {lead.status.replaceAll("_", " ")}
         </p>
         <h2 id="reassign-lead-title" className="mt-2 font-serif text-2xl text-ink">
           {lead.status === "PENDING_REVIEW" ? "Reassign lead" : "Assign to a firm"}
@@ -85,7 +88,8 @@ export function ReassignmentDialog({
           </Button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -95,7 +99,7 @@ export function CaseReassignmentDialog({
   onClose,
   onComplete,
 }: {
-  caseRecord: { id: number; assigned_firm_id: number; lead_id: number } | null;
+  caseRecord: CaseRecord | null;
   firms: LawFirm[];
   onClose: () => void;
   onComplete: () => void;
@@ -104,7 +108,9 @@ export function CaseReassignmentDialog({
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  if (!caseRecord) return null;
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!caseRecord || !mounted) return null;
   const selectedCase = caseRecord;
   const currentFirm = firms.find((firm) => firm.id === selectedCase.assigned_firm_id);
   const targetFirm = firms.find((firm) => firm.id === Number(targetId));
@@ -124,13 +130,15 @@ export function CaseReassignmentDialog({
     }
   }
 
-  return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#10231fcc] p-4 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[70] flex h-dvh w-screen items-center justify-center overflow-y-auto bg-[#10231fcc] p-4 backdrop-blur-sm">
       <section role="dialog" aria-modal="true" aria-labelledby="reassign-case-title" className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl sm:p-8">
         <div className="grid h-11 w-11 place-items-center rounded-2xl bg-rose-50 text-rose">
           <AlertTriangle size={20} />
         </div>
-        <p className="mt-5 text-[10px] font-bold uppercase tracking-[.16em] text-rose">Access change · Case #{caseRecord.id}</p>
+        <p className="mt-5 text-[10px] font-bold uppercase tracking-[.16em] text-rose">
+          Access change · {caseRecord.lead.title}
+        </p>
         <h2 id="reassign-case-title" className="mt-2 font-serif text-2xl text-ink">Transfer case ownership</h2>
         <p className="mt-2 text-sm leading-6 text-muted">
           Reassignment immediately revokes {currentFirm?.name ?? "the current firm"} staff access.
@@ -139,12 +147,17 @@ export function CaseReassignmentDialog({
         {error && <div className="mt-4"><InlineMessage tone="error">{error}</InlineMessage></div>}
         <label className="field-label mt-5">
           New responsible firm
-          <select value={targetId} onChange={(event) => { setTargetId(event.target.value); setConfirmed(false); }} className="field-input">
-            <option value="">Choose a firm</option>
-            {firms.filter((firm) => firm.id !== selectedCase.assigned_firm_id).map((firm) => (
-              <option key={firm.id} value={firm.id}>{firm.name}</option>
-            ))}
-          </select>
+          <div className="mt-2">
+            <FirmPicker
+              firms={firms.filter((firm) => firm.id !== selectedCase.assigned_firm_id)}
+              selectedFirmId={targetId ? Number(targetId) : null}
+              ariaLabel="Search new responsible firms"
+              onSelect={(firm) => {
+                setTargetId(firm ? String(firm.id) : "");
+                setConfirmed(false);
+              }}
+            />
+          </div>
         </label>
         {targetFirm && (
           <label className="mt-5 flex cursor-pointer gap-3 rounded-xl border border-rose-100 bg-rose-50/60 p-4 text-sm leading-5 text-rose-900">
@@ -161,6 +174,7 @@ export function CaseReassignmentDialog({
           </Button>
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -7,12 +7,12 @@ import { useAuth } from "@/context/AuthContext";
 import { PortalAccess } from "@/components/PortalAccess";
 import { IntakeForm } from "@/components/plaintiff/IntakeForm";
 import { MyMatters } from "@/components/plaintiff/MyMatters";
-import type { Lead } from "@/lib/api";
+import type { LeadStatus } from "@/lib/api";
 
 export default function PlaintiffPage() {
   const { persona } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
-  const [lastLead, setLastLead] = useState<Lead | null>(null);
+  const [lastLeadStatus, setLastLeadStatus] = useState<LeadStatus | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "submit">("dashboard");
 
   if (persona.role !== "PLAINTIFF") {
@@ -70,9 +70,9 @@ export default function PlaintiffPage() {
 
       {activeTab === "dashboard" ? (
         <section>
-          {lastLead && (
+          {lastLeadStatus && (
             <div className="mb-5 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-              Lead #{lastLead.id} submitted · {lastLead.status.replaceAll("_", " ")}
+              Lead submitted · {lastLeadStatus.replaceAll("_", " ")}
             </div>
           )}
           <div className="mb-5">
@@ -94,7 +94,7 @@ export default function PlaintiffPage() {
           <IntakeForm
             key={persona.email}
             onCreated={(lead) => {
-              setLastLead(lead);
+              setLastLeadStatus(lead.status);
               setRefreshKey((value) => value + 1);
               setActiveTab("dashboard");
             }}

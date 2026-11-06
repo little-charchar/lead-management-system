@@ -3,21 +3,31 @@
 import { useEffect, useState } from "react";
 import { Activity, ChevronDown, Clock3, FileSearch, UserRound } from "lucide-react";
 
-import { api, type ApiError, type AuditLog, type CaseRecord, type Lead } from "@/lib/api";
+import {
+  api,
+  type ApiError,
+  type AuditLog,
+  type CaseRecord,
+  type LawFirm,
+  type Lead,
+} from "@/lib/api";
 import { Button, Card, InlineMessage, StatusPill } from "@/components/ui";
 
 export function AuditInspector({
   entity,
   leadRecord,
   onClose,
+  onOpenLead,
 }: {
   entity: { type: "LEAD" | "CASE"; id: number } | null;
   leadRecord?: Lead | null;
   onClose: () => void;
+  onOpenLead: (lead: Lead) => void;
 }) {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [caseRecord, setCaseRecord] = useState<CaseRecord | null>(null);
   const [lead, setLead] = useState<Lead | null>(null);
+  const [firms, setFirms] = useState<LawFirm[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const chronologicalLogs = [...logs].sort((a, b) => {
@@ -32,12 +42,14 @@ export function AuditInspector({
     Promise.all([
       api.fetchAuditLogs(entity.type, entity.id),
       entity.type === "CASE" ? api.fetchCase(entity.id) : Promise.resolve(null),
+      api.fetchFirms(),
     ])
-      .then(([audit, matter]) => {
+      .then(([audit, matter, firmRecords]) => {
         if (!active) return;
         setLogs(audit);
         setCaseRecord(matter);
         setLead(entity.type === "LEAD" ? (leadRecord ?? null) : null);
+        setFirms(firmRecords);
       })
       .catch((reason: unknown) => {
         if (active) setError((reason as ApiError).message ?? "Could not load the audit trail.");
@@ -51,6 +63,11 @@ export function AuditInspector({
   }, [entity, leadRecord]);
 
   if (!entity) return null;
+  const relatedLead = lead ?? caseRecord?.lead ?? null;
+  const firmNames = new Map(firms.map((firm) => [firm.id, firm.name]));
+  const title =
+    relatedLead?.title ??
+    (entity.type === "CASE" ? "Case activity" : "Lead activity");
 
   return (
     <div className="fixed inset-0 z-[65] flex justify-end bg-[#10231f99]" role="presentation" onMouseDown={(event) => {
@@ -60,9 +77,7 @@ export function AuditInspector({
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-line bg-white/95 px-6 py-5 backdrop-blur">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[.16em] text-forest">Immutable history</p>
-            <h2 className="mt-1 font-serif text-2xl text-ink">
-              {entity.type === "CASE" ? "Case" : "Lead"} #{entity.id}
-            </h2>
+            <h2 className="mt-1 font-serif text-2xl text-ink">{title}</h2>
           </div>
           <Button type="button" variant="secondary" onClick={onClose}>Close</Button>
         </div>
@@ -86,7 +101,9 @@ export function AuditInspector({
                   <div key={note.id} className="mb-2 rounded-xl bg-[#f7f8f6] p-3">
                     <p className="whitespace-pre-wrap text-sm leading-5 text-ink">{note.content}</p>
                     <p className="mt-2 text-[10px] text-muted">
-                      {note.author?.name ?? "Former staff"} · Firm #{note.author_firm_id} · {new Date(note.created_at).toLocaleString()}
+                      {note.author?.name ?? "Former staff"} ·{" "}
+                      {firmNames.get(note.author_firm_id) ?? "Former firm"} ·{" "}
+                      {new Date(note.created_at).toLocaleString()}
                     </p>
                   </div>
                 )) : <p className="text-xs text-muted">No historical notes.</p>}
@@ -94,14 +111,27 @@ export function AuditInspector({
             </Card>
           )}
           {entity.type === "LEAD" && lead && (
+            <button
+              type="button"
+              onClick={() => onOpenLead(lead)}
+              className="w-full rounded-2xl text-left transition hover:ring-2 hover:ring-forest/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-forest"
+              aria-label={`Open lead details for ${lead.title}`}
+            >
             <Card className="flex items-center justify-between gap-3 p-5">
               <div>
                 <p className="text-[10px] font-bold uppercase tracking-[.14em] text-muted">Lead record</p>
-                <p className="mt-1 font-semibold text-ink">{lead.plaintiff?.name}</p>
-                <p className="mt-1 text-xs text-muted">{lead.category.replaceAll("_", " ")} · {lead.region}</p>
+                <p className="mt-1 font-semibold text-ink">{lead.title}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {lead.plaintiff?.name} · {lead.plaintiff?.email}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {lead.category.replaceAll("_", " ")} · {lead.region} ·{" "}
+                  {lead.assigned_firm?.name ?? "Unassigned"}
+                </p>
               </div>
               <StatusPill status={lead.status} />
             </Card>
+            </button>
           )}
           <div>
             <h3 className="mb-4 flex items-center gap-2 text-sm font-bold text-ink">
@@ -119,6 +149,7 @@ export function AuditInspector({
                   const changes = describeChanges(
                     log.previous_state,
                     log.new_state,
+                    firmNames,
                   );
                   return (
                     <li key={log.id} className="relative pl-12">
@@ -133,7 +164,14 @@ export function AuditInspector({
                             </p>
                             <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
                               <UserRound size={13} />
-                              {log.actor?.name ?? "System"} · {log.entity_type} #{log.entity_id}
+                              {log.actor?.name ?? "System"}
+                              {log.actor?.role === "ADMIN" ? " · Admin" : ""}
+                              {log.actor?.role === "ATTORNEY" ||
+                              log.actor?.role === "PARALEGAL"
+                                ? ` · ${firmNames.get(log.actor.law_firm_id ?? -1) ?? "Firm unavailable"}`
+                                : ""}
+                              {" · "}
+                              {log.entity_type.toLowerCase()} activity
                             </p>
                           </div>
                           <time
@@ -205,11 +243,21 @@ function StateBlock({
   label: string;
   value: Record<string, unknown> | null;
 }) {
+  const readableValue = value
+    ? Object.fromEntries(
+        Object.entries(value)
+          .filter(([key]) => key !== "id" && !key.endsWith("_id"))
+          .map(([key, item]) => [
+            key,
+            item,
+          ]),
+      )
+    : null;
   return (
     <div className="min-w-0 rounded-xl bg-[#f6f7f5] p-3">
       <p className="mb-2 text-[9px] font-bold uppercase tracking-[.13em] text-muted">{label}</p>
       <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-[#40504a]">
-        {JSON.stringify(value, null, 2) ?? "null"}
+        {JSON.stringify(readableValue, null, 2) ?? "null"}
       </pre>
     </div>
   );
@@ -229,27 +277,30 @@ function formatAction(action: string): string {
 function describeChanges(
   previous: Record<string, unknown> | null,
   next: Record<string, unknown>,
+  firms: Map<number, string>,
 ): { label: string; previous: string; next: string }[] {
   const labels: Record<string, string> = {
     assigned_firm_id: "Assigned firm",
     case_assigned_firm_id: "Case firm",
-    lead_assigned_firm_id: "Lead firm",
     status: "Status",
   };
 
   return Object.entries(next)
-    .filter(([key, value]) => previous?.[key] !== value)
+    .filter(
+      ([key, value]) =>
+        key !== "lead_assigned_firm_id" && previous?.[key] !== value,
+    )
     .map(([key, value]) => ({
       label: labels[key] ?? key.replaceAll("_", " "),
-      previous: formatValue(previous?.[key]),
-      next: formatValue(value),
+      previous: formatValue(previous?.[key], firms),
+      next: formatValue(value, firms),
     }));
 }
 
-function formatValue(value: unknown): string {
+function formatValue(value: unknown, firms: Map<number, string>): string {
   if (value === undefined || value === null) return "None";
   if (typeof value === "string") return value.replaceAll("_", " ");
-  if (typeof value === "number") return `Firm #${value}`;
+  if (typeof value === "number") return firms.get(value) ?? "Firm assignment unavailable";
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
 }

@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import {
   Check,
   LockKeyhole,
-  MessageSquareText,
   Search,
   Send,
   X,
@@ -58,13 +63,14 @@ export function CaseWorkspace({
   const [noteText, setNoteText] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const requestId = useRef(0);
 
   const loadCases = useCallback(async () => {
-    setBusy(true);
+    const currentRequestId = ++requestId.current;
     setError("");
     try {
       const results = await api.fetchFirmCasePage({
-        search: search || undefined,
+        search: search.trim().length >= 2 ? search.trim() : undefined,
         status: stages.includes(statusFilter as CaseStatus)
           ? (statusFilter as CaseStatus)
           : undefined,
@@ -72,12 +78,14 @@ export function CaseWorkspace({
         offset: page * PAGE_SIZE,
         limit: PAGE_SIZE,
       });
+      if (currentRequestId !== requestId.current) return;
       setCases(results.items);
       setTotal(results.total);
     } catch (reason) {
+      if (currentRequestId !== requestId.current) return;
       setError((reason as ApiError).message ?? "Cases could not be loaded.");
     } finally {
-      setBusy(false);
+      if (currentRequestId === requestId.current) setBusy(false);
     }
   }, [initialCase, page, search, statusFilter]);
 
@@ -149,12 +157,6 @@ export function CaseWorkspace({
     }
   }
 
-  function applySearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setPage(0);
-    setSearch(searchInput.trim());
-  }
-
   async function openCase(item: CaseListRecord) {
     setRecord(null);
     setError("");
@@ -184,8 +186,7 @@ export function CaseWorkspace({
             </p>
           </div>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-          <form onSubmit={applySearch} className="flex w-full gap-2 sm:w-auto">
-            <label className="relative min-w-0 flex-1 sm:w-80">
+            <label className="relative min-w-[220px] flex-1 sm:w-80">
               <span className="sr-only">Search active cases</span>
               <Search
                 size={15}
@@ -193,29 +194,28 @@ export function CaseWorkspace({
               />
               <input
                 value={searchInput}
-                onChange={(event) => setSearchInput(event.target.value)}
-                placeholder="Name, email, title, region…"
+                onChange={(event) => {
+                  setSearchInput(event.target.value);
+                  setPage(0);
+                }}
+                placeholder="Name, email, title, category, region…"
                 className="field-input pl-9"
               />
             </label>
-            <Button type="submit" variant="secondary" disabled={busy}>
-              Search
-            </Button>
-          </form>
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              setStatusFilter(event.target.value as CaseStatusFilter);
-              setPage(0);
-            }}
-            className="field-input w-auto min-w-[190px]"
-            aria-label="Filter cases by status"
-          >
-            <option value="ALL">All statuses</option>
-            {stages.map((stage) => (
-              <option key={stage} value={stage}>{stage.replaceAll("_", " ")}</option>
-            ))}
-          </select>
+            <select
+              value={statusFilter}
+              onChange={(event) => {
+                setStatusFilter(event.target.value as CaseStatusFilter);
+                setPage(0);
+              }}
+              className="field-input w-auto min-w-[190px]"
+              aria-label="Filter cases by status"
+            >
+              <option value="ALL">All statuses</option>
+              {stages.map((stage) => (
+                <option key={stage} value={stage}>{stage.replaceAll("_", " ")}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -261,7 +261,7 @@ export function CaseWorkspace({
                     >
                       <td className="px-5 py-4 sm:px-6">
                         <p className="text-sm font-semibold text-ink">{item.lead.title}</p>
-                        <p className="mt-1 text-xs text-muted">Case #{item.id}</p>
+                        <p className="mt-1 text-xs text-muted">Accepted matter</p>
                       </td>
                       <td className="px-5 py-4">
                         <p className="text-sm text-ink">{item.lead.plaintiff?.name ?? "Client"}</p>
@@ -310,14 +310,16 @@ export function CaseWorkspace({
             <header className="flex items-start justify-between gap-4 border-b border-line bg-white px-5 py-5 sm:px-7">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-forest">
-                  Case #{record.id} · Lead #{record.lead_id}
+                  {record.lead.plaintiff?.name ?? "Client"}
                 </p>
                 <h2 id="firm-case-heading" className="mt-1 break-words font-serif text-2xl text-ink sm:text-3xl">
                   {record.lead.title}
                 </h2>
                 <p className="mt-2 text-sm text-muted">
-                  {record.lead.category.replaceAll("_", " ")} · {record.lead.region} ·{" "}
-                  {record.lead.plaintiff?.name}
+                  {record.lead.plaintiff?.email}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {record.lead.category.replaceAll("_", " ")} · {record.lead.region}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3">
@@ -400,23 +402,56 @@ export function CaseWorkspace({
               </Card>
 
               <Card className="p-5">
-                <h3 className="text-sm font-bold text-ink">Case details</h3>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-muted">
-                  {record.lead.description}
-                </p>
+                <h3 className="text-sm font-bold text-ink">Case information</h3>
+                <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                  <div>
+                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      Client
+                    </dt>
+                    <dd className="mt-1 text-ink">
+                      {record.lead.plaintiff?.name ?? "Client"}
+                    </dd>
+                    <dd className="text-xs text-muted">
+                      {record.lead.plaintiff?.email}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      Category and region
+                    </dt>
+                    <dd className="mt-1 text-ink">
+                      {record.lead.category.replaceAll("_", " ")} · {record.lead.region}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      Last updated
+                    </dt>
+                    <dd className="mt-1 text-ink">
+                      {new Date(record.updated_at).toLocaleString()}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="mt-4 border-t border-line pt-4">
+                  <h3 className="text-sm font-bold text-ink">Case details</h3>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-muted">
+                    {record.lead.description}
+                  </p>
+                </div>
               </Card>
 
               <DocumentExchange
                 caseRecord={record}
+                showCaseRetentionNote={false}
                 onUploaded={(document) => {
                   const updated = { ...record, documents: [...record.documents, document] };
                   setRecord(updated);
                   setCases((current) =>
-                  current.map((item) =>
-                    item.id === updated.id
-                      ? { ...item, document_count: item.document_count + 1 }
-                      : item,
-                  ),
+                    current.map((item) =>
+                      item.id === updated.id
+                        ? { ...item, document_count: item.document_count + 1 }
+                        : item,
+                    ),
                   );
                 }}
               />
@@ -424,11 +459,28 @@ export function CaseWorkspace({
               <Card className="p-5 sm:p-6">
                 <div className="flex items-center gap-2 text-forest">
                   <LockKeyhole size={17} />
-                  <h3 className="text-sm font-bold">Firm-private workspace</h3>
+                  <h3 className="text-sm font-bold">Case messages</h3>
+                  <span className="rounded-full bg-canvas px-2 py-0.5 text-[10px] text-muted">
+                    {record.notes?.length ?? 0}
+                  </span>
                 </div>
-                <p className="mt-2 text-xs leading-5 text-forest/70">
-                  Notes are visible to your current firm and system administrators only.
-                </p>
+                {record.notes?.length ? (
+                  <div className="mt-4 space-y-3">
+                    {record.notes.map((note) => (
+                      <article key={note.id} className="rounded-xl bg-canvas/70 p-4">
+                        <p className="whitespace-pre-wrap text-sm leading-6 text-ink">
+                          {note.content}
+                        </p>
+                        <p className="mt-2 text-[10px] text-muted">
+                          {note.author?.name ?? "Former staff"} ·{" "}
+                          {new Date(note.created_at).toLocaleString()}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm text-muted">No private notes yet.</p>
+                )}
                 <form onSubmit={addNote} className="mt-4">
                   <label className="field-label">
                     Add a case note
@@ -447,33 +499,6 @@ export function CaseWorkspace({
                     {noteBusy ? "Saving…" : "Save private note"}
                   </Button>
                 </form>
-              </Card>
-
-              <Card className="p-5 sm:p-6">
-                <h3 className="flex items-center gap-2 text-sm font-bold text-ink">
-                  <MessageSquareText size={16} className="text-forest" />
-                  Notes visible to this firm
-                  <span className="rounded-full bg-canvas px-2 py-0.5 text-[10px] text-muted">
-                    {record.notes?.length ?? 0}
-                  </span>
-                </h3>
-                {record.notes?.length ? (
-                  <div className="mt-4 space-y-3">
-                    {record.notes.map((note) => (
-                      <article key={note.id} className="rounded-xl bg-canvas/70 p-4">
-                        <p className="whitespace-pre-wrap text-sm leading-6 text-ink">
-                          {note.content}
-                        </p>
-                        <p className="mt-2 text-[10px] text-muted">
-                          {note.author?.name ?? "Former staff"} ·{" "}
-                          {new Date(note.created_at).toLocaleString()}
-                        </p>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm text-muted">No private notes yet.</p>
-                )}
               </Card>
             </div>
           </aside>

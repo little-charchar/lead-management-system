@@ -1,9 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
-  ArrowUpRight,
   Briefcase,
   Clock3,
   FileCheck2,
@@ -48,10 +47,11 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
+  const requestId = useRef(0);
 
   const loadLeads = useCallback(async () => {
+    const currentRequestId = ++requestId.current;
     setError("");
-    setBusy(true);
     try {
       const [leadsResult, pendingResult, casesResult] = await Promise.all([
         api.fetchLeadPage({
@@ -67,15 +67,17 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
           offset: casePage * PAGE_SIZE,
         }),
       ]);
+      if (currentRequestId !== requestId.current) return;
       setLeads(leadsResult.items);
       setUnresolvedTotal(leadsResult.total);
       setPendingTotal(pendingResult.total);
       setCases(casesResult.items);
       setCaseTotal(casesResult.total);
     } catch (reason) {
+      if (currentRequestId !== requestId.current) return;
       setError((reason as ApiError).message ?? "Your leads could not be loaded.");
     } finally {
-      setBusy(false);
+      if (currentRequestId === requestId.current) setBusy(false);
     }
   }, [casePage, caseQuery, leadPage, leadQuery]);
 
@@ -202,7 +204,7 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-ink">
-                      {lead.title} <span className="font-normal text-muted">· Lead #{lead.id}</span>
+                      {lead.title}
                     </p>
                     <p className="mt-1 truncate text-xs text-muted">
                       {lead.category.replaceAll("_", " ")} · {lead.region} ·{" "}
@@ -210,7 +212,6 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
                     </p>
                   </div>
                   <StatusPill status={lead.status} />
-                  <ArrowUpRight size={16} className="text-muted" />
                 </button>
               ))}
             </div>
@@ -277,15 +278,15 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-ink">
-                      {record.lead.title} <span className="font-normal text-muted">· Case #{record.id}</span>
+                      {record.lead.title}
                     </p>
                     <p className="mt-1 text-xs text-muted">
                       {record.lead.category.replaceAll("_", " ")} · {record.lead.region} ·{" "}
+                      {record.lead.assigned_firm?.name ?? "Firm assignment pending"} ·{" "}
                       {record.document_count} shared document{record.document_count === 1 ? "" : "s"}
                     </p>
                   </div>
                   <StatusPill status={record.status} />
-                  <ArrowUpRight size={16} className="text-muted" />
                 </button>
               ))}
             </div>
@@ -319,7 +320,7 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
             <header className="flex items-start justify-between gap-5 border-b border-line bg-white px-5 py-5 sm:px-7">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-forest">
-                  {selectedCase ? `Case #${selectedCase.id}` : `Lead #${selectedLead.id}`}
+                  {selectedCase ? "Case workspace" : "Lead details"}
                 </p>
                 <h2
                   id="lead-details-heading"

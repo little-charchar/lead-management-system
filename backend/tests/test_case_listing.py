@@ -2,8 +2,19 @@
 
 from typing import Any
 
+from sqlalchemy.orm import Session
 
-def _accept_lead(client: Any, email: str, name: str, title: str) -> int:
+from app.models import RoutingRule
+
+
+def _accept_lead(
+    client: Any,
+    email: str,
+    name: str,
+    title: str,
+    *,
+    region: str = "NY",
+) -> int:
     """Create and accept a routed lead, returning the case ID."""
     submitted = client.post(
         "/api/leads",
@@ -13,7 +24,7 @@ def _accept_lead(client: Any, email: str, name: str, title: str) -> int:
             "email": email,
             "title": title,
             "category": "PERSONAL_INJURY",
-            "region": "NY",
+            "region": region,
             "description": "A sufficiently detailed legal inquiry for case listing.",
         },
     )
@@ -96,7 +107,9 @@ def test_firm_case_listing_is_scoped_searchable_and_paginated(
 
 
 def test_plaintiff_case_listing_is_scoped_searchable_and_paginated(
-    client: Any, baseline: dict[str, int | str]
+    client: Any,
+    baseline: dict[str, int | str],
+    db_engine: Any,
 ) -> None:
     """Plaintiffs can search and page their cases without reading other matters."""
     first_case_id = _accept_lead(
@@ -117,13 +130,29 @@ def test_plaintiff_case_listing_is_scoped_searchable_and_paginated(
         "Bob Plaintiff",
         "Other plaintiff collision",
     )
+    with Session(db_engine) as db:
+        db.add(
+            RoutingRule(
+                category="PERSONAL_INJURY",
+                region="TX",
+                law_firm_id=int(baseline["apex_id"]),
+            )
+        )
+        db.commit()
+    texas_case_id = _accept_lead(
+        client,
+        str(baseline["jane_email"]),
+        "Jane Plaintiff",
+        "Injury claim in another state",
+        region="TX",
+    )
 
     first_page = client.get(
         "/api/cases/mine?search=New%20York&limit=1&offset=0",
         user=str(baseline["jane_email"]),
     )
     second_page = client.get(
-        "/api/cases/mine?limit=1&offset=1",
+        "/api/cases/mine?search=New%20York&limit=1&offset=1",
         user=str(baseline["jane_email"]),
     )
     assert first_page.status_code == 200, first_page.text
@@ -138,6 +167,15 @@ def test_plaintiff_case_listing_is_scoped_searchable_and_paginated(
     assert "notes" not in first_page.json()[0]
     assert "documents" not in first_page.json()[0]
     assert "document_count" in first_page.json()[0]
+    assert first_page.json()[0]["lead"]["assigned_firm"]["name"] == "Apex Legal"
+
+    partial_region_search = client.get(
+        "/api/cases/mine?search=tex&limit=10",
+        user=str(baseline["jane_email"]),
+    )
+    assert partial_region_search.status_code == 200, partial_region_search.text
+    assert partial_region_search.headers["X-Total-Count"] == "1"
+    assert [item["id"] for item in partial_region_search.json()] == [texas_case_id]
 
     denied = client.get(
         "/api/cases/mine",

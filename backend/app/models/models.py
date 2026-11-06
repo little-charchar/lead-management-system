@@ -101,6 +101,12 @@ class User(Base):
     )
 
 
+    @property
+    def law_firm_name(self) -> str | None:
+        """Return the uploader's firm name when a firm relationship exists."""
+        return self.law_firm.name if self.law_firm is not None else None
+
+
 class RoutingRule(Base):
     """A deterministic category-and-region-to-firm routing rule."""
 
@@ -263,6 +269,13 @@ class Document(Base):
     __tablename__ = "documents"
     __table_args__ = (
         Index("ix_documents_case_created", "case_id", "created_at", "id"),
+        Index(
+            "ix_documents_case_uploader_firm_created",
+            "case_id",
+            "uploaded_by_firm_id",
+            "created_at",
+            "id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -271,6 +284,9 @@ class Document(Base):
     )
     uploaded_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    uploaded_by_firm_id: Mapped[int | None] = mapped_column(
+        ForeignKey("law_firms.id", ondelete="SET NULL"), nullable=True
     )
     file_name: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -289,6 +305,7 @@ class Document(Base):
     uploaded_by: Mapped[User | None] = relationship(
         back_populates="uploaded_documents", foreign_keys=[uploaded_by_id]
     )
+    uploaded_by_firm: Mapped[LawFirm | None] = relationship()
 
 
 class LeadAttachment(Base):

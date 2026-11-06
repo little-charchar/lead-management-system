@@ -83,6 +83,25 @@ def test_firm_inbox_only_contains_its_assigned_leads(
     assert len(second_page.json()) == 1
     assert first_page.json()[0]["id"] != second_page.json()[0]["id"]
 
+    category_filtered = client.get(
+        "/api/leads?category=PERSONAL_INJURY",
+        user=str(baseline["sarah_email"]),
+    )
+    region_filtered = client.get(
+        "/api/leads?region=NY",
+        user=str(baseline["sarah_email"]),
+    )
+    assert category_filtered.status_code == 200, category_filtered.text
+    assert region_filtered.status_code == 200, region_filtered.text
+    assert {lead["id"] for lead in category_filtered.json()} == {
+        apex_lead["id"],
+        second_apex_lead["id"],
+    }
+    assert {lead["id"] for lead in region_filtered.json()} == {
+        apex_lead["id"],
+        second_apex_lead["id"],
+    }
+
 
 def test_accepting_lead_creates_case_and_audit_records(
     client: Any,

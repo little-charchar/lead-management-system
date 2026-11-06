@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Download,
   FileSearch,
-  RefreshCw,
   Search,
   UserRoundCog,
   X,
@@ -22,6 +21,7 @@ import {
 } from "@/lib/api";
 import { Button, Card, InlineMessage, StatusPill } from "@/components/ui";
 import { FirmPicker } from "@/components/admin/FirmPicker";
+import { DocumentExchange } from "@/components/plaintiff/DocumentExchange";
 import { Pagination } from "@/components/Pagination";
 import { DrawerPortal } from "@/components/DrawerPortal";
 
@@ -41,6 +41,8 @@ const PAGE_SIZE = 10;
 
 export function GlobalDirectory({
   onInspect,
+  leadToOpen,
+  onLeadOpened,
   onReassignLead,
   onReassignCase,
   refreshKey = 0,
@@ -49,6 +51,8 @@ export function GlobalDirectory({
     entity: { type: "LEAD" | "CASE"; id: number },
     lead?: Lead,
   ) => void;
+  leadToOpen?: Lead | null;
+  onLeadOpened?: () => void;
   onReassignLead: (lead: Lead, firms: LawFirm[]) => void;
   onReassignCase: (record: CaseRecord, firms: LawFirm[]) => void;
   refreshKey?: number;
@@ -60,23 +64,29 @@ export function GlobalDirectory({
   const [caseStatus, setCaseStatus] = useState<CaseStatus | "ALL">("ALL");
   const [caseSearchInput, setCaseSearchInput] = useState("");
   const [caseSearch, setCaseSearch] = useState("");
+  const [leadSearchInput, setLeadSearchInput] = useState("");
   const [leadPage, setLeadPage] = useState(0);
   const [casePage, setCasePage] = useState(0);
   const [leadTotal, setLeadTotal] = useState(0);
   const [caseTotal, setCaseTotal] = useState(0);
-  const [firmId, setFirmId] = useState("");
-  const [search, setSearch] = useState("");
+  const [leadFirmId, setLeadFirmId] = useState("");
+  const [caseFirmId, setCaseFirmId] = useState("");
+  const [leadSearch, setLeadSearch] = useState("");
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [selectedLeadCase, setSelectedLeadCase] = useState<CaseRecord | null>(null);
   const [loadingLeadCase, setLoadingLeadCase] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const requestId = useRef(0);
+  const lastDetailsRefreshKey = useRef(refreshKey);
+  const selectedCaseId = selectedCase?.id;
 
   const load = useCallback(async () => {
-    setLoading(true);
+    const currentRequestId = ++requestId.current;
     setError("");
-    const leadSearchTerm = search.trim().length >= 2 ? search.trim() : undefined;
+    const leadSearchTerm =
+      leadSearch.trim().length >= 2 ? leadSearch.trim() : undefined;
     const caseSearchTerm =
       caseSearch.trim().length >= 2 ? caseSearch.trim() : undefined;
     try {
@@ -84,7 +94,7 @@ export function GlobalDirectory({
         api.fetchLeadPage({
           status: leadStatus === "ALL" ? undefined : leadStatus,
           search: leadSearchTerm,
-          assigned_firm_id: firmId ? Number(firmId) : undefined,
+          assigned_firm_id: leadFirmId ? Number(leadFirmId) : undefined,
           exclude_accepted: true,
           limit: PAGE_SIZE,
           offset: leadPage * PAGE_SIZE,
@@ -92,12 +102,13 @@ export function GlobalDirectory({
         api.fetchAdminCasePage({
           search: caseSearchTerm,
           status: caseStatus === "ALL" ? undefined : caseStatus,
-          firm_id: firmId ? Number(firmId) : undefined,
+          firm_id: caseFirmId ? Number(caseFirmId) : undefined,
           limit: PAGE_SIZE,
           offset: casePage * PAGE_SIZE,
         }),
         api.fetchFirms(),
       ]);
+      if (currentRequestId !== requestId.current) return;
       setLeads(
         [...leadRecords.items].sort(
           (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
@@ -108,12 +119,21 @@ export function GlobalDirectory({
       setCaseTotal(caseRecords.total);
       setFirms(firmRecords);
     } catch (reason) {
+      if (currentRequestId !== requestId.current) return;
       setError((reason as ApiError).message ?? "The global directory could not be loaded.");
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestId.current) setLoading(false);
     }
-
-  }, [casePage, caseSearch, caseStatus, firmId, leadPage, leadStatus, search]);
+  }, [
+    caseFirmId,
+    casePage,
+    caseSearch,
+    caseStatus,
+    leadFirmId,
+    leadPage,
+    leadSearch,
+    leadStatus,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void load(), 250);
@@ -139,6 +159,48 @@ export function GlobalDirectory({
       if (refreshedLead) setSelectedLead(refreshedLead);
     }
   }, [leads, selectedLead]);
+
+  useEffect(() => {
+    if (lastDetailsRefreshKey.current === refreshKey) return;
+    lastDetailsRefreshKey.current = refreshKey;
+    if (selectedCaseId === undefined) return;
+    let active = true;
+    api
+      .fetchCase(selectedCaseId)
+      .then((record) => {
+        if (active) setSelectedCase(record);
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError((reason as ApiError).message ?? "Updated case details could not be loaded.");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [refreshKey, selectedCaseId]);
+
+  useEffect(() => {
+    if (!leadToOpen) return;
+    void openLead(leadToOpen);
+    onLeadOpened?.();
+  }, [leadToOpen, onLeadOpened]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setLeadPage(0);
+      setLeadSearch(leadSearchInput.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [leadSearchInput]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCasePage(0);
+      setCaseSearch(caseSearchInput.trim());
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [caseSearchInput]);
 
   async function openCase(record: CaseListRecord) {
     setSelectedLead(null);
@@ -181,44 +243,13 @@ export function GlobalDirectory({
     setSelectedLeadCase(null);
   }
 
-  function applyCaseSearch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setCasePage(0);
-    setCaseSearch(caseSearchInput.trim());
-  }
-
-  function downloadCaseDocument(record: CaseRecord, documentId: number, filename: string) {
-    void api
-      .downloadDocument(record.id, documentId)
-      .then((blob) => {
-        const url = URL.createObjectURL(blob);
-        const anchor = window.document.createElement("a");
-        anchor.href = url;
-        anchor.download = filename;
-        anchor.click();
-        window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-      })
-      .catch((reason: unknown) =>
-        setError((reason as ApiError).message ?? "The document could not be downloaded."),
-      );
-  }
-
-  function downloadLeadAttachment(lead: Lead, attachmentId: number, filename: string) {
-    void api
-      .downloadLeadAttachment(lead.id, attachmentId)
-      .then((blob) => saveBlob(blob, filename))
-      .catch((reason: unknown) =>
-        setError((reason as ApiError).message ?? "The lead attachment could not be downloaded."),
-      );
-  }
-
   const showingLeadCase = selectedLeadCase;
   const drawerOpen = selectedLead !== null || selectedCase !== null;
   return (
     <>
       <div className="space-y-6">
         <Card id="directory" className="overflow-hidden">
-          <div className="flex flex-col gap-4 border-b border-line p-5 sm:px-6 lg:flex-row lg:items-end lg:justify-between">
+          <div className="flex flex-col items-start gap-4 border-b border-line p-5 sm:px-6">
             <div>
               <div className="flex items-center gap-2 text-forest">
                 <UserRoundCog size={17} />
@@ -229,30 +260,28 @@ export function GlobalDirectory({
                 Unaccepted leads awaiting review or assignment. Accepted leads are managed as cases below.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <label className="relative min-w-[220px]">
+            <div className="flex w-full flex-wrap gap-2">
+              <label className="relative min-w-[220px] flex-1 sm:max-w-sm">
                 <span className="sr-only">Search leads</span>
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
                 <input
-                  value={search}
+                  value={leadSearchInput}
                   onChange={(event) => {
-                    setSearch(event.target.value);
+                    setLeadSearchInput(event.target.value);
                     setLeadPage(0);
-                    setCasePage(0);
                   }}
-                  placeholder="Name, email, title, region"
+                  placeholder="Name, email, title, region…"
                   className="field-input pl-9"
                 />
               </label>
               <FirmPicker
                 firms={firms}
-                selectedFirmId={firmId ? Number(firmId) : null}
+                selectedFirmId={leadFirmId ? Number(leadFirmId) : null}
                 placeholder="All firms"
-                ariaLabel="Search and filter by firm in both directories"
+                ariaLabel="Filter leads by firm"
                 onSelect={(firm) => {
-                  setFirmId(firm ? String(firm.id) : "");
+                  setLeadFirmId(firm ? String(firm.id) : "");
                   setLeadPage(0);
-                  setCasePage(0);
                 }}
               />
               <select
@@ -269,9 +298,6 @@ export function GlobalDirectory({
                   <option key={status} value={status}>{status.replaceAll("_", " ")}</option>
                 ))}
               </select>
-              <Button type="button" variant="secondary" className="px-3" onClick={() => void load()}>
-                <RefreshCw size={15} />
-              </Button>
             </div>
           </div>
 
@@ -303,9 +329,9 @@ export function GlobalDirectory({
                   >
                     <td className="px-6 py-4">
                       <p className="text-sm font-semibold text-ink">
-                        {lead.plaintiff?.name ?? `Lead #${lead.id}`}
+                        {lead.plaintiff?.name ?? "Plaintiff"}
                       </p>
-                      <p className="mt-1 text-[11px] text-muted">{lead.title} · #{lead.id}</p>
+                      <p className="mt-1 text-[11px] text-muted">{lead.title}</p>
                     </td>
                     <td className="px-4 py-4 text-sm text-ink">
                       {lead.category.replaceAll("_", " ")} · {lead.region}
@@ -386,12 +412,11 @@ export function GlobalDirectory({
             <div>
               <h3 className="font-serif text-2xl text-ink">Case directory</h3>
               <p className="mt-1 text-xs text-muted">
-                Accepted leads are cases. Search by client, title, category, or region; the firm filter above applies here too.
+                Accepted leads are cases. Search by client, title, category, or region and use this table&apos;s independent firm filter.
               </p>
             </div>
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-              <form onSubmit={applyCaseSearch} className="flex w-full gap-2 sm:w-auto">
-                <label className="relative min-w-0 flex-1 sm:w-80">
+              <label className="relative w-full sm:w-80">
                   <span className="sr-only">Search cases</span>
                   <Search
                     size={15}
@@ -403,11 +428,17 @@ export function GlobalDirectory({
                     placeholder="Name, email, title, region…"
                     className="field-input pl-9"
                   />
-                </label>
-                <Button type="submit" variant="secondary" disabled={loading}>
-                  Search
-                </Button>
-              </form>
+              </label>
+              <FirmPicker
+                firms={firms}
+                selectedFirmId={caseFirmId ? Number(caseFirmId) : null}
+                placeholder="All firms"
+                ariaLabel="Filter cases by firm"
+                onSelect={(firm) => {
+                  setCaseFirmId(firm ? String(firm.id) : "");
+                  setCasePage(0);
+                }}
+              />
               <select
                 value={caseStatus}
                 onChange={(event) => {
@@ -453,7 +484,7 @@ export function GlobalDirectory({
                   >
                     <td className="px-6 py-4">
                       <p className="text-sm font-semibold text-ink">{record.lead.title}</p>
-                      <p className="mt-1 text-[11px] text-muted">Case #{record.id}</p>
+                      <p className="mt-1 text-[11px] text-muted">Accepted matter</p>
                     </td>
                     <td className="px-4 py-4 text-sm text-ink">
                       <p>{record.lead.plaintiff?.name ?? "Client"}</p>
@@ -463,7 +494,9 @@ export function GlobalDirectory({
                       {record.lead.category.replaceAll("_", " ")} · {record.lead.region}
                     </td>
                     <td className="px-4 py-4 text-sm text-muted">
-                      {firms.find((firm) => firm.id === record.assigned_firm_id)?.name ?? `Firm #${record.assigned_firm_id}`}
+                      {record.lead.assigned_firm?.name ??
+                        firms.find((firm) => firm.id === record.assigned_firm_id)?.name ??
+                        "Firm assignment unavailable"}
                     </td>
                     <td className="px-4 py-4"><StatusPill status={record.status} /></td>
                     <td className="px-4 py-4 text-xs text-muted">
@@ -548,7 +581,7 @@ export function GlobalDirectory({
             <header className="flex items-start justify-between gap-4 border-b border-line bg-white px-5 py-5 sm:px-7">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[.16em] text-forest">
-                  {selectedCase ? `Case #${selectedCase.id}` : `Lead #${selectedLead?.id}`}
+                  {selectedCase ? "Case details" : "Lead details"}
                 </p>
                 <h2 className="mt-1 break-words font-serif text-2xl text-ink sm:text-3xl">
                   {selectedCase?.lead.title ?? selectedLead?.title}
@@ -556,6 +589,11 @@ export function GlobalDirectory({
                 <p className="mt-2 text-sm text-muted">
                   {(selectedCase?.lead ?? selectedLead)?.category.replaceAll("_", " ")} ·{" "}
                   {(selectedCase?.lead ?? selectedLead)?.region}
+                </p>
+                <p className="mt-2 text-sm text-ink">
+                  <span className="font-semibold">Assigned firm:</span>{" "}
+                  {(selectedCase?.lead ?? selectedLead)?.assigned_firm?.name ??
+                    "Unassigned"}
                 </p>
               </div>
               <div className="flex shrink-0 items-center gap-3">
@@ -574,46 +612,86 @@ export function GlobalDirectory({
               {selectedLead && (
                 <>
                   <Card className="p-5">
-                    <h3 className="text-sm font-bold text-ink">Lead details</h3>
+                    <h3 className="text-sm font-bold text-ink">Lead information</h3>
+                    <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                      <div>
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                          Plaintiff
+                        </dt>
+                        <dd className="mt-1 text-ink">
+                          {selectedLead.plaintiff?.name ?? "Plaintiff"}
+                        </dd>
+                        <dd className="text-xs text-muted">
+                          {selectedLead.plaintiff?.email}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                          Category and region
+                        </dt>
+                        <dd className="mt-1 text-ink">
+                          {selectedLead.category.replaceAll("_", " ")} · {selectedLead.region}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                          Submitted
+                        </dt>
+                        <dd className="mt-1 text-ink">
+                          {new Date(selectedLead.created_at).toLocaleString()}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                          Last updated
+                        </dt>
+                        <dd className="mt-1 text-ink">
+                          {new Date(selectedLead.updated_at).toLocaleString()}
+                        </dd>
+                      </div>
+                    </dl>
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-muted">
                       {selectedLead.description}
                     </p>
-                    <p className="mt-4 border-t border-line pt-3 text-xs text-muted">
-                      {selectedLead.plaintiff?.name} · {selectedLead.plaintiff?.email}
-                    </p>
                   </Card>
-                  {selectedLead.attachments.length > 0 && (
+                  {selectedLead.status !== "ACCEPTED" && (
                     <Card className="p-5">
                       <h3 className="text-sm font-bold text-ink">
                         Supporting PDFs ({selectedLead.attachments.length})
                       </h3>
-                      <ul className="mt-3 space-y-2">
-                        {selectedLead.attachments.map((file) => (
-                          <li key={file.id} className="flex items-center gap-2 text-sm">
-                            <span className="min-w-0 flex-1 truncate text-ink">{file.file_name}</span>
-                            <button
-                              type="button"
-                              aria-label={`Download ${file.file_name}`}
-                              className="rounded-lg p-2 text-muted hover:bg-canvas hover:text-forest"
-                              onClick={async () => {
-                                try {
-                                  const blob = await api.downloadLeadAttachment(selectedLead.id, file.id);
-                                  const url = URL.createObjectURL(blob);
-                                  const anchor = window.document.createElement("a");
-                                  anchor.href = url;
-                                  anchor.download = file.file_name;
-                                  anchor.click();
-                                  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
-                                } catch (reason) {
-                                  setError((reason as ApiError).message ?? "Attachment download failed.");
-                                }
-                              }}
-                            >
-                              <Download size={16} />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
+                      {selectedLead.attachments.length === 0 ? (
+                        <p className="mt-3 text-sm text-muted">
+                          No files were attached to this lead.
+                        </p>
+                      ) : (
+                        <ul className="mt-3 space-y-2">
+                          {selectedLead.attachments.map((file) => (
+                            <li key={file.id} className="flex items-center gap-2 text-sm">
+                              <span className="min-w-0 flex-1 truncate text-ink">{file.file_name}</span>
+                              <button
+                                type="button"
+                                aria-label={`Download ${file.file_name}`}
+                                className="rounded-lg p-2 text-muted hover:bg-canvas hover:text-forest"
+                                onClick={async () => {
+                                  try {
+                                    const blob = await api.downloadLeadAttachment(selectedLead.id, file.id);
+                                    const url = URL.createObjectURL(blob);
+                                    const anchor = window.document.createElement("a");
+                                    anchor.href = url;
+                                    anchor.download = file.file_name;
+                                    anchor.click();
+                                    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+                                  } catch (reason) {
+                                    setError((reason as ApiError).message ?? "Attachment download failed.");
+                                  }
+                                }}
+                              >
+                                <Download size={16} />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </Card>
                   )}
                   {selectedLead.status === "ACCEPTED" && (
@@ -622,8 +700,7 @@ export function GlobalDirectory({
                     ) : showingLeadCase ? (
                       <CaseDetails
                         record={showingLeadCase}
-                        onDownload={downloadCaseDocument}
-                        onDownloadLeadAttachment={downloadLeadAttachment}
+                        firms={firms}
                       />
                     ) : null
                   )}
@@ -632,8 +709,7 @@ export function GlobalDirectory({
               {selectedCase && (
                 <CaseDetails
                   record={selectedCase}
-                  onDownload={downloadCaseDocument}
-                  onDownloadLeadAttachment={downloadLeadAttachment}
+                  firms={firms}
                 />
               )}
               <div className="sticky bottom-0 flex flex-wrap gap-2 border-t border-line bg-[#fbfcfa] py-4">
@@ -686,72 +762,47 @@ export function GlobalDirectory({
   );
 }
 
-function CaseDetails({
-  record,
-  onDownload,
-  onDownloadLeadAttachment,
-}: {
-  record: CaseRecord;
-  onDownload: (record: CaseRecord, documentId: number, filename: string) => void;
-  onDownloadLeadAttachment: (
-    lead: Lead,
-    attachmentId: number,
-    filename: string,
-  ) => void;
-}) {
+function CaseDetails({ record, firms }: { record: CaseRecord; firms: LawFirm[] }) {
   return (
     <>
       <Card className="p-5">
-        <h3 className="text-sm font-bold text-ink">Case details</h3>
+        <h3 className="text-sm font-bold text-ink">Case information</h3>
+        <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Plaintiff
+            </dt>
+            <dd className="mt-1 text-ink">{record.lead.plaintiff?.name ?? "Client"}</dd>
+            <dd className="text-xs text-muted">{record.lead.plaintiff?.email}</dd>
+          </div>
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Category and region
+            </dt>
+            <dd className="mt-1 text-ink">
+              {record.lead.category.replaceAll("_", " ")} · {record.lead.region}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+              Last updated
+            </dt>
+            <dd className="mt-1 text-ink">{new Date(record.updated_at).toLocaleString()}</dd>
+          </div>
+        </dl>
+        <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+          <p className="text-sm font-bold text-ink">Case details</p>
+          <StatusPill status={record.status} />
+        </div>
         <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-muted">
           {record.lead.description}
         </p>
-        <div className="mt-4 border-t border-line pt-3">
-          <StatusPill status={record.status} />
-        </div>
       </Card>
-      {record.lead.attachments.length > 0 && (
-        <Card className="p-5">
-          <h3 className="text-sm font-bold text-ink">Original plaintiff uploads</h3>
-          <ul className="mt-3 space-y-2">
-            {record.lead.attachments.map((file) => (
-              <li key={file.id} className="flex items-center gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate text-ink">{file.file_name}</span>
-                <button
-                  type="button"
-                  aria-label={`Download ${file.file_name}`}
-                  onClick={() =>
-                    onDownloadLeadAttachment(record.lead, file.id, file.file_name)
-                  }
-                  className="rounded-lg p-2 text-muted hover:bg-canvas hover:text-forest"
-                >
-                  <Download size={16} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-      <Card className="p-5">
-        <h3 className="text-sm font-bold text-ink">Shared case documents</h3>
-        {record.documents.length > 0 ? (
-          <ul className="mt-3 space-y-2">
-            {record.documents.map((document) => (
-              <li key={document.id} className="flex items-center gap-2 text-sm">
-                <span className="min-w-0 flex-1 truncate text-ink">{document.file_name}</span>
-                <button
-                  type="button"
-                  aria-label={`Download ${document.file_name}`}
-                  onClick={() => onDownload(record, document.id, document.file_name)}
-                  className="rounded-lg p-2 text-muted hover:bg-canvas hover:text-forest"
-                >
-                  <Download size={16} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        ) : <p className="mt-3 text-sm text-muted">No case documents.</p>}
-      </Card>
+      <DocumentExchange
+        caseRecord={record}
+        allowUpload={false}
+        showCaseRetentionNote={false}
+      />
       <Card className="p-5">
         <h3 className="text-sm font-bold text-ink">Historical private notes · all firms</h3>
         {record.notes?.length ? (
@@ -760,7 +811,8 @@ function CaseDetails({
               <li key={note.id} className="rounded-xl bg-canvas p-3">
                 <p className="whitespace-pre-wrap text-sm leading-6 text-ink">{note.content}</p>
                 <p className="mt-2 text-[10px] text-muted">
-                  {note.author?.name ?? "Former staff"} · Firm #{note.author_firm_id} ·{" "}
+                  {note.author?.name ?? "Former staff"} ·{" "}
+                  {firms.find((firm) => firm.id === note.author_firm_id)?.name ?? "Former firm"} ·{" "}
                   {new Date(note.created_at).toLocaleString()}
                 </p>
               </li>
@@ -770,13 +822,4 @@ function CaseDetails({
       </Card>
     </>
   );
-}
-
-function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = window.document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }

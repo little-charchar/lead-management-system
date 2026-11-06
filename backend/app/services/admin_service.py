@@ -126,13 +126,14 @@ def reassign_case(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Target firm not found."
             )
-        previous_state = {
-            "assigned_firm_id": case.assigned_firm_id,
-            "lead_assigned_firm_id": lead.assigned_firm_id,
-            "status": case.status.value,
-        }
+        previous_case_firm_id = case.assigned_firm_id
+        previous_case_status = case.status.value
+        previous_lead_firm_id = lead.assigned_firm_id
+        firm_changed = case.assigned_firm_id != firm.id
         case.assigned_firm_id = firm.id
         lead.assigned_firm_id = firm.id
+        if firm_changed:
+            case.status = CaseStatus.INTAKE
         db.add(
             AuditLog(
                 entity_type="LEAD",
@@ -140,7 +141,7 @@ def reassign_case(
                 actor_id=actor.id,
                 action=AuditAction.REASSIGNED.value,
                 previous_state={
-                    "assigned_firm_id": previous_state["lead_assigned_firm_id"],
+                    "assigned_firm_id": previous_lead_firm_id,
                     "status": lead.status.value,
                 },
                 new_state={
@@ -155,10 +156,12 @@ def reassign_case(
                 entity_id=case.id,
                 actor_id=actor.id,
                 action=AuditAction.REASSIGNED.value,
-                previous_state=previous_state,
+                previous_state={
+                    "assigned_firm_id": previous_case_firm_id,
+                    "status": previous_case_status,
+                },
                 new_state={
                     "assigned_firm_id": case.assigned_firm_id,
-                    "lead_assigned_firm_id": lead.assigned_firm_id,
                     "status": case.status.value,
                 },
             )
@@ -235,4 +238,4 @@ def list_admin_cases(
         .limit(limit)
         .offset(offset)
     ).all()
-    return get_case_summaries(db, list(case_ids)), total
+    return get_case_summaries(db, list(case_ids), admin), total

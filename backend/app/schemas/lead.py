@@ -12,7 +12,7 @@ from pydantic import (
 )
 
 from app.models.enums import LeadStatus
-from app.schemas.common import LawFirmRead, UserSummary
+from app.schemas.common import DocumentUploaderRead, LawFirmRead, UserSummary
 
 MAX_LEAD_DESCRIPTION_WORDS = 1000
 
@@ -29,7 +29,7 @@ class LeadAttachmentRead(BaseModel):
     file_size_bytes: int
     mime_type: str
     created_at: datetime
-    uploader: UserSummary | None = Field(
+    uploader: DocumentUploaderRead | None = Field(
         default=None,
         validation_alias=AliasChoices("uploaded_by", "uploader"),
     )

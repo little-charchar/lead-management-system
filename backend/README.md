@@ -23,11 +23,13 @@ same dynamically configured database URL as the application.
 
 ## Seed data
 
-Run `python -m app.seed` from `backend/` to reset the tables declared in the
-application metadata and load development personas and sample records. This is
-destructive to those tables; do not point it at a database containing data you
-need to keep. The container startup uses `python -m app.seed --if-empty`, which
-preserves data and migration-created indexes on subsequent starts.
+Run `python -m app.seed` from `backend/` to clear application rows and load a
+larger demo dataset: 3 firms, 19 personas, 100 leads, 40 cases, private notes,
+and audit history. The reset preserves the schema and Alembic-managed indexes,
+but is destructive to application data; do not point it at a database containing
+records you need to keep. The container startup uses
+`python -m app.seed --if-empty`, which preserves existing records and seeds only
+an empty database.
 
 ## Run the API
 

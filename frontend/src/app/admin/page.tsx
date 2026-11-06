@@ -5,7 +5,6 @@ import type { ReactNode } from "react";
 import {
   Activity,
   Building2,
-  RefreshCw,
   ShieldCheck,
   UsersRound,
 } from "lucide-react";
@@ -18,7 +17,7 @@ import {
   ReassignmentDialog,
 } from "@/components/admin/ReassignmentDialog";
 import { AuditInspector } from "@/components/admin/AuditInspector";
-import { Button, Card, InlineMessage } from "@/components/ui";
+import { Card, InlineMessage } from "@/components/ui";
 import { api, type ApiError, type CaseRecord, type LawFirm, type Lead } from "@/lib/api";
 
 export default function AdminPage() {
@@ -28,6 +27,7 @@ export default function AdminPage() {
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [selectedCase, setSelectedCase] = useState<CaseRecord | null>(null);
   const [inspectedLead, setInspectedLead] = useState<Lead | null>(null);
+  const [leadToOpen, setLeadToOpen] = useState<Lead | null>(null);
   const [directoryRefresh, setDirectoryRefresh] = useState(0);
   const [auditEntity, setAuditEntity] = useState<{
     type: "LEAD" | "CASE";
@@ -53,7 +53,7 @@ export default function AdminPage() {
         .catch(() => setAuditCount(0));
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [persona.email, loadFirms]);
+  }, [directoryRefresh, persona.email, loadFirms]);
 
   if (persona.role !== "ADMIN") {
     return <PortalAccess allowed={["ADMIN"]} />;
@@ -75,19 +75,6 @@ export default function AdminPage() {
               every matter has a responsible next step.
             </p>
           </div>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              void loadFirms();
-              api
-                .fetchAuditLogs()
-                .then((logs) => setAuditCount(logs.length))
-                .catch(() => undefined);
-            }}
-          >
-            <RefreshCw size={15} /> Refresh overview
-          </Button>
         </div>
       </section>
 
@@ -100,6 +87,8 @@ export default function AdminPage() {
 
       <GlobalDirectory
         refreshKey={directoryRefresh}
+        leadToOpen={leadToOpen}
+        onLeadOpened={() => setLeadToOpen(null)}
         onInspect={(entity, lead) => {
           setAuditEntity(entity);
           setInspectedLead(lead ?? null);
@@ -141,6 +130,11 @@ export default function AdminPage() {
         onClose={() => {
           setAuditEntity(null);
           setInspectedLead(null);
+        }}
+        onOpenLead={(lead) => {
+          setAuditEntity(null);
+          setInspectedLead(null);
+          setLeadToOpen(lead);
         }}
       />
     </div>

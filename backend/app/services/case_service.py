@@ -49,8 +49,11 @@ def _load_case(db: Session, case_id: int) -> Case:
             selectinload(Case.lead).selectinload(Lead.assigned_firm),
             selectinload(Case.lead)
             .selectinload(Lead.attachments)
-            .selectinload(LeadAttachment.uploaded_by),
-            selectinload(Case.documents).selectinload(Document.uploaded_by),
+            .selectinload(LeadAttachment.uploaded_by)
+            .selectinload(User.law_firm),
+            selectinload(Case.documents)
+            .selectinload(Document.uploaded_by)
+            .selectinload(User.law_firm),
         )
     )
     if case is None:
@@ -81,6 +84,48 @@ def _check_case_access(case: Case, user: User) -> None:
         )
 
 
+def _document_visible_in_case(case: Case, document: Document, user: User) -> bool:
+    """Limit case document metadata to the plaintiff and firms entitled to it."""
+    if user.role == UserRole.ADMIN:
+        return True
+    if user.role == UserRole.PLAINTIFF:
+        return (
+            case.lead.plaintiff_id == user.id
+            and (
+                document.uploaded_by is not None
+                and document.uploaded_by.role
+                in {UserRole.PLAINTIFF, UserRole.ADMIN}
+                or document.uploaded_by_firm_id == case.assigned_firm_id
+            )
+        )
+    if user.role in {UserRole.ATTORNEY, UserRole.PARALEGAL}:
+        return (
+            document.uploaded_by is not None
+            and document.uploaded_by.role in {UserRole.PLAINTIFF, UserRole.ADMIN}
+        ) or document.uploaded_by_firm_id == user.law_firm_id
+    return False
+
+
+def _can_download_case_document(case: Case, document: Document, user: User) -> bool:
+    """Authorize a case document while preserving former firms' own-file access."""
+    if user.role == UserRole.ADMIN:
+        return True
+    if user.role == UserRole.PLAINTIFF:
+        return (
+            case.lead.plaintiff_id == user.id
+            and _document_visible_in_case(case, document, user)
+        )
+    if user.role in {UserRole.ATTORNEY, UserRole.PARALEGAL}:
+        return (
+            user.law_firm_id == document.uploaded_by_firm_id
+            or (
+                user.law_firm_id == case.assigned_firm_id
+                and _document_visible_in_case(case, document, user)
+            )
+        )
+    return False
+
+
 def get_case_detail(db: Session, case_id: int, user: User) -> (
     PlaintiffCaseDetailRead | FirmCaseDetailRead | CaseDetailRead
 ):
@@ -95,7 +140,11 @@ def get_case_detail(db: Session, case_id: int, user: User) -> (
         "created_at": case.created_at,
         "updated_at": case.updated_at,
         "lead": case.lead,
-        "documents": case.documents,
+        "documents": [
+            document
+            for document in case.documents
+            if _document_visible_in_case(case, document, user)
+        ],
     }
     if user.role == UserRole.PLAINTIFF:
         return PlaintiffCaseDetailRead.model_validate(base)
@@ -117,7 +166,9 @@ def get_case_detail(db: Session, case_id: int, user: User) -> (
     return FirmCaseDetailRead.model_validate(response_data)
 
 
-def get_case_summaries(db: Session, case_ids: list[int]) -> list[CaseListRead]:
+def get_case_summaries(
+    db: Session, case_ids: list[int], user: User
+) -> list[CaseListRead]:
     """Load case directory rows without fetching their notes or document records."""
     if not case_ids:
         return []
@@ -131,12 +182,20 @@ def get_case_summaries(db: Session, case_ids: list[int]) -> list[CaseListRead]:
         )
     ).all()
     cases_by_id = {case.id: case for case in cases}
+    document_counts = select(Document.case_id, func.count(Document.id)).where(
+        Document.case_id.in_(case_ids)
+    )
+    if user.role != UserRole.ADMIN:
+        document_counts = document_counts.outerjoin(
+            User, User.id == Document.uploaded_by_id
+        ).where(
+            or_(
+                User.role.in_({UserRole.PLAINTIFF, UserRole.ADMIN}),
+                Document.uploaded_by_firm_id == user.law_firm_id,
+            )
+        )
     counts = dict(
-        db.execute(
-            select(Document.case_id, func.count(Document.id))
-            .where(Document.case_id.in_(case_ids))
-            .group_by(Document.case_id)
-        ).all()
+        db.execute(document_counts.group_by(Document.case_id)).all()
     )
     return [
         CaseListRead.model_validate(
@@ -204,7 +263,7 @@ def list_firm_cases(
             .limit(limit)
         ).all()
     )
-    return get_case_summaries(db, case_ids), total
+    return get_case_summaries(db, case_ids, staff_user), total
 
 
 def list_plaintiff_cases(
@@ -248,7 +307,7 @@ def list_plaintiff_cases(
             .limit(limit)
         ).all()
     )
-    return get_case_summaries(db, case_ids), total
+    return get_case_summaries(db, case_ids, plaintiff), total
 
 
 def get_case_for_lead(
@@ -532,6 +591,11 @@ async def upload_case_document(
         document = Document(
             case_id=case.id,
             uploaded_by_id=user.id,
+            uploaded_by_firm_id=(
+                user.law_firm_id
+                if user.role in {UserRole.ATTORNEY, UserRole.PARALEGAL}
+                else None
+            ),
             file_name=(safe_filename[:255] or stored_name),
             file_path=relative_path,
             file_size_bytes=file_size,
@@ -561,14 +625,29 @@ def get_case_document(
 ) -> tuple[Document, Path]:
     """Authorize document access and resolve its path inside the upload root."""
     case = _load_case(db, case_id)
-    _check_case_access(case, user)
     document = db.scalar(
         select(Document).where(
             Document.id == document_id,
             Document.case_id == case.id,
         )
     )
+    if user.role in {UserRole.PLAINTIFF, UserRole.ADMIN}:
+        _check_case_access(case, user)
+    elif user.role in {UserRole.ATTORNEY, UserRole.PARALEGAL} and (
+        user.law_firm_id == case.assigned_firm_id
+        or (
+            document is not None
+            and document.uploaded_by_firm_id == user.law_firm_id
+        )
+    ):
+        pass
+    else:
+        _check_case_access(case, user)
     if document is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Document not found."
+        )
+    if not _can_download_case_document(case, document, user):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Document not found."
         )

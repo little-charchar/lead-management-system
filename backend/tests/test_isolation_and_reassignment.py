@@ -68,6 +68,13 @@ def test_case_reassignment_changes_firm_visibility_and_preserves_history(
     assert len(plaintiff_data["documents"]) == 1
     assert "notes" not in plaintiff_data
 
+    advanced = client.patch(
+        f"/api/cases/{case_id}/status",
+        user=str(baseline["sarah_email"]),
+        json={"status": "DISCOVERY"},
+    )
+    assert advanced.status_code == 200, advanced.text
+
     reassigned = client.post(
         f"/api/admin/cases/{case_id}/reassign",
         user=str(baseline["admin_email"]),
@@ -75,6 +82,7 @@ def test_case_reassignment_changes_firm_visibility_and_preserves_history(
     )
     assert reassigned.status_code == 200, reassigned.text
     assert reassigned.json()["assigned_firm_id"] == baseline["beacon_id"]
+    assert reassigned.json()["status"] == "INTAKE"
 
     with Session(db_engine) as db:
         audit = db.scalar(
@@ -86,7 +94,9 @@ def test_case_reassignment_changes_firm_visibility_and_preserves_history(
         )
     assert audit is not None
     assert audit.previous_state["assigned_firm_id"] == baseline["apex_id"]
+    assert audit.previous_state["status"] == "DISCOVERY"
     assert audit.new_state["assigned_firm_id"] == baseline["beacon_id"]
+    assert audit.new_state["status"] == "INTAKE"
 
     former_firm_case = client.get(
         f"/api/cases/{case_id}",
@@ -101,6 +111,7 @@ def test_case_reassignment_changes_firm_visibility_and_preserves_history(
     assert new_firm_case.status_code == 200
     new_firm_data = new_firm_case.json()
     assert new_firm_data["assigned_firm_id"] == baseline["beacon_id"]
+    assert new_firm_data["status"] == "INTAKE"
     assert len(new_firm_data["documents"]) == 1
     assert new_firm_data["notes"] == []
 

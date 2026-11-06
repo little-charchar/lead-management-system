@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   Download,
@@ -39,30 +39,37 @@ export function PendingLeadCards({
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("");
+  const [region, setRegion] = useState("");
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [busyLead, setBusyLead] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const requestId = useRef(0);
 
   const reload = useCallback(async () => {
-    setLoading(true);
+    const currentRequestId = ++requestId.current;
     setError("");
     try {
       const results = await api.fetchInboxPage({
         search: search.length >= 2 ? search : undefined,
+        category: category || undefined,
+        region: region || undefined,
         offset: page * PAGE_SIZE,
         limit: PAGE_SIZE,
       });
+      if (currentRequestId !== requestId.current) return;
       setLeads(results.items);
       setTotal(results.total);
     } catch (reason) {
+      if (currentRequestId !== requestId.current) return;
       setError((reason as ApiError).message ?? "The review inbox could not be loaded.");
     } finally {
-      setLoading(false);
+      if (currentRequestId === requestId.current) setLoading(false);
     }
-  }, [page, search]);
+  }, [category, page, region, search]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void reload(), 0);
@@ -99,11 +106,11 @@ export function PendingLeadCards({
         const caseRecord = await api.acceptLead(lead.id);
         setSelectedLead(null);
         onAccepted(caseRecord);
-        setNotice(`Lead #${lead.id} accepted. Case #${caseRecord.id} is ready.`);
+        setNotice("Lead accepted. The case is ready in your case workspace.");
       } else {
         await api.declineLead(lead.id);
         setSelectedLead(null);
-        setNotice(`Lead #${lead.id} declined and returned for admin resolution.`);
+        setNotice("Lead declined and returned for administrator resolution.");
       }
       await reload();
     } catch (reason) {
@@ -149,15 +156,52 @@ export function PendingLeadCards({
             <p className="mt-1 text-xs text-muted">Search and review pending leads</p>
           </div>
         </div>
-        <label className="relative min-w-[220px]">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
-          <input
-            value={searchInput}
-            onChange={(event) => setSearchInput(event.target.value)}
-            placeholder="Search name, title, email…"
-            className="field-input pl-9"
-          />
-        </label>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+          <label className="relative min-w-[220px] flex-1">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+            <input
+              value={searchInput}
+              onChange={(event) => {
+                setSearchInput(event.target.value);
+                setPage(0);
+              }}
+              placeholder="Name, email, title, category, region…"
+              className="field-input pl-9"
+              aria-label="Search pending leads"
+            />
+          </label>
+          <select
+            value={category}
+            onChange={(event) => {
+              setCategory(event.target.value);
+              setPage(0);
+            }}
+            className="field-input w-auto min-w-[155px]"
+            aria-label="Filter leads by category"
+          >
+            <option value="">All categories</option>
+            <option value="PERSONAL_INJURY">Personal injury</option>
+            <option value="LABOR">Employment &amp; labor</option>
+            <option value="FAMILY">Family law</option>
+            <option value="IMMIGRATION">Immigration</option>
+            <option value="OTHER">Other</option>
+          </select>
+          <select
+            value={region}
+            onChange={(event) => {
+              setRegion(event.target.value);
+              setPage(0);
+            }}
+            className="field-input w-auto min-w-[140px]"
+            aria-label="Filter leads by region"
+          >
+            <option value="">All regions</option>
+            <option value="NY">New York</option>
+            <option value="CA">California</option>
+            <option value="ON">Ontario</option>
+            <option value="TX">Texas</option>
+          </select>
+        </div>
       </div>
       <div className="p-5 sm:p-6">
         {error && <div className="mb-4"><InlineMessage tone="error">{error}</InlineMessage></div>}
@@ -167,9 +211,9 @@ export function PendingLeadCards({
         ) : leads.length === 0 ? (
           <EmptyState
             icon={<Filter size={21} />}
-            title={search ? "No matching leads" : "Inbox is clear"}
+            title={search || category || region ? "No matching leads" : "Inbox is clear"}
             description={
-              search
+              search || category || region
                 ? "Try a different name, category, region, or phrase."
                 : "New leads assigned to your firm will appear here."
             }
@@ -187,10 +231,9 @@ export function PendingLeadCards({
                       {lead.title}
                     </p>
                     <p className="mt-1 truncate text-xs text-muted">
-                      {lead.plaintiff?.name ?? `Lead #${lead.id}`} · {lead.plaintiff?.email}
+                      {lead.plaintiff?.name ?? "Plaintiff"} · {lead.plaintiff?.email}
                     </p>
                   </div>
-                  <StatusPill status={lead.status} />
                 </div>
                 <div className="my-4 flex flex-wrap gap-2">
                   <span className="rounded-full bg-canvas px-3 py-1 text-[11px] font-semibold text-ink">
@@ -207,16 +250,36 @@ export function PendingLeadCards({
                   {lead.description}
                 </p>
                 <div className="mt-4 border-t border-line pt-3">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full"
-                    disabled={busyLead !== null}
-                    onClick={() => setSelectedLead(lead)}
-                  >
-                    Review details · {lead.attachments.length}{" "}
-                    {lead.attachments.length === 1 ? "file" : "files"}
-                  </Button>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <StatusPill status={lead.status} />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busyLead !== null}
+                      onClick={() => setSelectedLead(lead)}
+                    >
+                      Review details
+                    </Button>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <Button
+                      type="button"
+                      disabled={busyLead !== null}
+                      onClick={() => void decide(lead, "accept")}
+                    >
+                      <Check size={14} />
+                      {busyLead === lead.id ? "Working…" : "Accept"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={busyLead !== null}
+                      onClick={() => void decide(lead, "decline")}
+                    >
+                      <X size={14} />
+                      Decline
+                    </Button>
+                  </div>
                 </div>
               </article>
             ))}
@@ -249,25 +312,31 @@ export function PendingLeadCards({
           >
             <header className="flex items-start justify-between gap-4 border-b border-line bg-white px-5 py-5 sm:px-7">
               <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-forest">
-                  Lead #{selectedLead.id} · Submitted{" "}
-                  {new Date(selectedLead.created_at).toLocaleDateString()}
+                <p className="text-sm font-semibold text-forest">
+                  {selectedLead.plaintiff?.name ?? "Plaintiff"}
+                </p>
+                <p className="mt-1 text-xs text-muted">
+                  {selectedLead.plaintiff?.email}
                 </p>
                 <h2 id="review-lead-heading" className="mt-1 break-words font-serif text-2xl text-ink sm:text-3xl">
                   {selectedLead.title}
                 </h2>
                 <p className="mt-2 text-sm text-muted">
-                  {selectedLead.category.replaceAll("_", " ")} · {selectedLead.region}
+                  {selectedLead.category.replaceAll("_", " ")} · {selectedLead.region} ·{" "}
+                  Submitted {new Date(selectedLead.created_at).toLocaleDateString()}
                 </p>
               </div>
-              <button
-                type="button"
-                aria-label="Close lead details"
-                onClick={() => setSelectedLead(null)}
-                className="rounded-xl p-2 text-muted transition hover:bg-canvas hover:text-ink"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex shrink-0 items-center gap-3">
+                <StatusPill status={selectedLead.status} />
+                <button
+                  type="button"
+                  aria-label="Close lead details"
+                  onClick={() => setSelectedLead(null)}
+                  className="rounded-xl p-2 text-muted transition hover:bg-canvas hover:text-ink"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </header>
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5 sm:p-7">
               {error && <InlineMessage tone="error">{error}</InlineMessage>}
@@ -276,9 +345,6 @@ export function PendingLeadCards({
                 <h3 className="text-sm font-bold text-ink">Lead details</h3>
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-muted">
                   {selectedLead.description}
-                </p>
-                <p className="mt-4 border-t border-line pt-3 text-xs text-muted">
-                  {selectedLead.plaintiff?.name} · {selectedLead.plaintiff?.email}
                 </p>
               </Card>
               <Card className="p-5">

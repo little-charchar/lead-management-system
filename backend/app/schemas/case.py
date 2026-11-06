@@ -11,7 +11,7 @@ from pydantic import (
 )
 
 from app.models.enums import CaseStatus, LeadStatus
-from app.schemas.common import LawFirmRead, UserSummary
+from app.schemas.common import DocumentUploaderRead, LawFirmRead, UserSummary
 from app.schemas.lead import LeadRead
 
 
@@ -33,7 +33,7 @@ class DocumentRead(BaseModel):
     file_size_bytes: int
     mime_type: str
     created_at: datetime
-    uploader: UserSummary | None = Field(
+    uploader: DocumentUploaderRead | None = Field(
         default=None,
         validation_alias=AliasChoices("uploaded_by", "uploader"),
     )

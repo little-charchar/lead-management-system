@@ -54,8 +54,10 @@ workspaces. These are seeded demo identities, not real user accounts.
 | Elena Admin | `admin@system.com` | System administrator | — |
 
 The seed also includes Bob Smith (`bob@plaintiff.com`), Mark Paralegal
-(`mark@apexlegal.com`), Crestview Counsel, several routing rules, an unmatched
-lead, a pending lead, and an accepted sample case.
+(`mark@apexlegal.com`), Crestview Counsel, several routing rules, and 12
+additional plaintiff personas. The expanded dataset contains 100 leads across
+unassigned, pending, accepted, and declined workflows; 40 cases across multiple
+progress stages; firm-private notes; and a populated audit timeline.
 
 ## Five-minute interactive verification
 

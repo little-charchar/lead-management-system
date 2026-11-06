@@ -13,7 +13,12 @@ REGION_SEARCH_ALIASES = {
 
 
 def region_search_terms(query: str) -> tuple[str, ...]:
-    """Return region-equivalent terms when a query exactly names a known region."""
+    """Return region-equivalent terms for complete or partial region searches."""
     normalized = query.strip().upper()
-    alias = REGION_SEARCH_ALIASES.get(normalized)
-    return (query, alias) if alias else (query,)
+    terms = [query]
+    for abbreviation, full_name in REGION_SEARCH_ALIASES.items():
+        if normalized and (
+            normalized in abbreviation or normalized in full_name
+        ):
+            terms.extend((abbreviation, full_name))
+    return tuple(dict.fromkeys(terms))
