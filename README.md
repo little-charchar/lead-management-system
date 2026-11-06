@@ -90,56 +90,19 @@ documents, audit history, reassignment, and firm isolation:
 The same flow can be explored in the API docs. The frontend demo switcher sends
 the selected identity in the `X-Demo-User-Email` header.
 
-## Architecture and system design
+## Demo routing: region and category to firm
 
-### Monorepo instead of microservices
+The seed data routes leads to a firm only when both the category and region
+match:
 
-The application is a modular monolith: the frontend and backend are separate
-deployable containers, while the domain logic and transactional database remain
-in one API service. Accepting a lead and creating its case are a single
-transactional workflow, so a service boundary would add network and distributed
-failure modes without improving this assessment's scale target of approximately
-1,000 leads per day. The monorepo and Compose setup also make the complete
-application straightforward to review and run.
+| Category | Region | Routed firm |
+| --- | --- | --- |
+| `PERSONAL_INJURY` | `NY` | Apex Legal Partners |
+| `LABOR` | `CA` | Beacon Rights Group |
+| `FAMILY` | `ON` | Crestview Counsel |
 
-### Relational schema and tenant isolation
-
-PostgreSQL stores the transactional domain data; SQLAlchemy 2.0 models and
-typed relationships express constraints and provide a maintainable unit-of-work
-layer. Alembic migrations are the schema source of truth. This keeps routing,
-assignment, case creation, and audit updates transactionally consistent while
-retaining the ability to issue explicit SQL for reporting and indexing.
-
-Each case's `assigned_firm_id` determines which firm currently has access.
-Reassignment updates the case and its lead, so the former firm loses access
-immediately and the new firm receives the case and its documents. Notes carry
-their own `author_firm_id`; firm reads filter notes to the current firm's ID,
-not the case's current owner. Therefore a reassigned firm does not inherit
-another firm's private notes, while authorized administrators can inspect the
-historical record. Plaintiff responses do not include private notes.
-
-Indexes support tenant-scoped filters, ordering, related-record lookup, and
-audit history. A PostgreSQL `pg_trgm` migration accelerates substring search.
-Directory APIs use pagination and compact case summaries so list pages do not
-load hundreds of related documents and notes for every row.
-
-### Document storage
-
-PDF bytes are stored on disk under `backend/uploads/`; PostgreSQL stores
-case-linked metadata such as filename, MIME type, size, uploader, and file path.
-This keeps large binary payloads out of transactional rows and lets documents
-remain associated with a case through reassignment. Compose bind-mounts the
-upload directory so files survive container replacement. A production
-deployment should replace local disk with durable object storage and configure
-backups and retention policies.
-
-### Demo authentication boundary
-
-This assessment build uses `X-Demo-User-Email` to switch among seeded personas.
-It is a convenient workflow demonstration, **not production authentication or
-authorization at the network boundary**. A public deployment must replace it
-with a verified identity provider/session mechanism and harden secrets,
-transport security, upload scanning, and operational policies.
+Other category and region combinations remain unassigned until an admin
+reassigns them.
 
 ## Automated tests
 

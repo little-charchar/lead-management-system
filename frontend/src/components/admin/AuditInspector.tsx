@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Activity, ChevronDown, Clock3, FileSearch, UserRound } from "lucide-react";
 
 import {
@@ -30,29 +31,64 @@ export function AuditInspector({
   const [firms, setFirms] = useState<LawFirm[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const chronologicalLogs = [...logs].sort((a, b) => {
-    const timeDifference =
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-    return timeDifference || a.id - b.id;
-  });
+  const [mounted, setMounted] = useState(false);
+  const chronologicalLogs = consolidateAcceptanceEvents(
+    [...logs].sort((a, b) => {
+      const timeDifference =
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      return timeDifference || a.id - b.id;
+    }),
+  );
+
+  useEffect(() => setMounted(true), []);
 
   useEffect(() => {
     if (!entity) return;
+    const selectedEntity = entity;
     let active = true;
-    Promise.all([
-      api.fetchAuditLogs(entity.type, entity.id),
-      entity.type === "CASE" ? api.fetchCase(entity.id) : Promise.resolve(null),
-      api.fetchFirms(),
-    ])
-      .then(([audit, matter, firmRecords]) => {
-        if (!active) return;
-        setLogs(audit);
-        setCaseRecord(matter);
-        setLead(entity.type === "LEAD" ? (leadRecord ?? null) : null);
-        setFirms(firmRecords);
-      })
+    setLoading(true);
+    setError("");
+    setLogs([]);
+    setCaseRecord(null);
+    setLead(entity.type === "LEAD" ? (leadRecord ?? null) : null);
+
+    async function loadHistory() {
+      const [primaryLogs, matter, firmRecords] = await Promise.all([
+        api.fetchAuditLogs(selectedEntity.type, selectedEntity.id),
+        selectedEntity.type === "CASE"
+          ? api.fetchCase(selectedEntity.id)
+          : Promise.resolve(null),
+        api.fetchFirms(),
+      ]);
+      if (!active) return;
+
+      let relatedLogs: AuditLog[] = [];
+      let linkedCase = matter;
+      if (selectedEntity.type === "CASE" && matter) {
+        relatedLogs = await api.fetchAuditLogs("LEAD", matter.lead.id);
+      } else if (
+        selectedEntity.type === "LEAD" &&
+        leadRecord?.status === "ACCEPTED"
+      ) {
+        linkedCase = await api.fetchCaseForLead(selectedEntity.id);
+        relatedLogs = await api.fetchAuditLogs("CASE", linkedCase.id);
+      }
+
+      if (!active) return;
+      const uniqueLogs = new Map(
+        [...primaryLogs, ...relatedLogs].map((log) => [log.id, log]),
+      );
+      setLogs([...uniqueLogs.values()]);
+      setCaseRecord(linkedCase);
+      setFirms(firmRecords);
+    }
+
+    void loadHistory()
       .catch((reason: unknown) => {
-        if (active) setError((reason as ApiError).message ?? "Could not load the audit trail.");
+        if (!active) return;
+        setError(
+          (reason as ApiError).message ?? "Could not load the audit trail.",
+        );
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -62,15 +98,15 @@ export function AuditInspector({
     };
   }, [entity, leadRecord]);
 
-  if (!entity) return null;
+  if (!entity || !mounted) return null;
   const relatedLead = lead ?? caseRecord?.lead ?? null;
   const firmNames = new Map(firms.map((firm) => [firm.id, firm.name]));
   const title =
     relatedLead?.title ??
     (entity.type === "CASE" ? "Case activity" : "Lead activity");
 
-  return (
-    <div className="fixed inset-0 z-[65] flex justify-end bg-[#10231f99]" role="presentation" onMouseDown={(event) => {
+  return createPortal(
+    <div className="fixed inset-0 z-[65] flex h-dvh w-screen justify-end bg-[#10231f99]" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <aside role="dialog" aria-modal="true" aria-label="Audit trail inspector" className="h-full w-full max-w-2xl overflow-y-auto bg-canvas shadow-2xl">
@@ -232,7 +268,8 @@ export function AuditInspector({
           </div>
         </div>
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -274,6 +311,52 @@ function formatAction(action: string): string {
   return labels[action] ?? action.replaceAll("_", " ");
 }
 
+function consolidateAcceptanceEvents(logs: AuditLog[]): AuditLog[] {
+  const consumed = new Set<number>();
+  const combined: AuditLog[] = [];
+
+  for (const log of logs) {
+    if (consumed.has(log.id)) continue;
+    if (log.entity_type !== "LEAD" || log.action !== "ACCEPTED") {
+      combined.push(log);
+      continue;
+    }
+
+    const caseLog = logs.find(
+      (candidate) =>
+        !consumed.has(candidate.id) &&
+        candidate.entity_type === "CASE" &&
+        candidate.action === "ACCEPTED" &&
+        candidate.actor_id === log.actor_id &&
+        candidate.new_state.lead_id === log.entity_id,
+    );
+    if (!caseLog) {
+      combined.push(log);
+      continue;
+    }
+
+    consumed.add(caseLog.id);
+    combined.push({
+      ...log,
+      previous_state: {
+        lead_status: log.previous_state?.status,
+        case_status: caseLog.previous_state?.status,
+        assigned_firm_id:
+          caseLog.previous_state?.assigned_firm_id ??
+          log.previous_state?.assigned_firm_id,
+      },
+      new_state: {
+        lead_status: log.new_state.status,
+        case_status: caseLog.new_state.status,
+        assigned_firm_id:
+          caseLog.new_state.assigned_firm_id ?? log.new_state.assigned_firm_id,
+      },
+    });
+  }
+
+  return combined;
+}
+
 function describeChanges(
   previous: Record<string, unknown> | null,
   next: Record<string, unknown>,
@@ -282,25 +365,37 @@ function describeChanges(
   const labels: Record<string, string> = {
     assigned_firm_id: "Assigned firm",
     case_assigned_firm_id: "Case firm",
+    case_status: "Case status",
+    lead_status: "Lead status",
     status: "Status",
   };
 
   return Object.entries(next)
     .filter(
       ([key, value]) =>
-        key !== "lead_assigned_firm_id" && previous?.[key] !== value,
+        key !== "lead_id" &&
+        key !== "lead_assigned_firm_id" &&
+        previous?.[key] !== value,
     )
     .map(([key, value]) => ({
       label: labels[key] ?? key.replaceAll("_", " "),
-      previous: formatValue(previous?.[key], firms),
-      next: formatValue(value, firms),
+      previous: formatValue(key, previous?.[key], firms),
+      next: formatValue(key, value, firms),
     }));
 }
 
-function formatValue(value: unknown, firms: Map<number, string>): string {
+function formatValue(
+  key: string,
+  value: unknown,
+  firms: Map<number, string>,
+): string {
   if (value === undefined || value === null) return "None";
   if (typeof value === "string") return value.replaceAll("_", " ");
-  if (typeof value === "number") return firms.get(value) ?? "Firm assignment unavailable";
+  if (typeof value === "number") {
+    return key.endsWith("assigned_firm_id")
+      ? firms.get(value) ?? "Firm assignment unavailable"
+      : String(value);
+  }
   if (typeof value === "boolean") return value ? "Yes" : "No";
   return String(value);
 }

@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { CheckCircle2, FilePlus2, Paperclip, Send, UserRound } from "lucide-react";
+import { useState, type ChangeEvent, type FormEvent } from "react";
+import {
+  CheckCircle2,
+  FilePlus2,
+  Paperclip,
+  Send,
+  UserRound,
+  X,
+} from "lucide-react";
 
 import { useAuth } from "@/context/AuthContext";
 import { api, type ApiError, type Lead } from "@/lib/api";
@@ -37,6 +44,24 @@ export function IntakeForm({ onCreated }: { onCreated: (lead: Lead) => void }) {
   const [attachmentError, setAttachmentError] = useState("");
   const [retryLeadId, setRetryLeadId] = useState<number | null>(null);
   const [retryFiles, setRetryFiles] = useState<File[]>([]);
+  const [selectedAttachments, setSelectedAttachments] = useState<File[]>([]);
+
+  function addAttachments(event: ChangeEvent<HTMLInputElement>) {
+    const newFiles = Array.from(event.target.files ?? []);
+    setSelectedAttachments((current) => {
+      const knownFiles = new Set(
+        current.map((file) => `${file.name}:${file.size}:${file.lastModified}`),
+      );
+      return [
+        ...current,
+        ...newFiles.filter(
+          (file) =>
+            !knownFiles.has(`${file.name}:${file.size}:${file.lastModified}`),
+        ),
+      ];
+    });
+    event.target.value = "";
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,9 +97,7 @@ export function IntakeForm({ onCreated }: { onCreated: (lead: Lead) => void }) {
         category: String(form.get("category") ?? ""),
         description: details,
       });
-      const attachments = form
-        .getAll("attachments")
-        .filter((value): value is File => value instanceof File && value.size > 0);
+      const attachments = selectedAttachments.filter((file) => file.size > 0);
       if (attachments.length > 0) {
         await uploadAttachments(lead.id, attachments);
       }
@@ -82,6 +105,7 @@ export function IntakeForm({ onCreated }: { onCreated: (lead: Lead) => void }) {
       onCreated(lead);
       formElement.reset();
       setDescription("");
+      setSelectedAttachments([]);
     } catch (reason) {
       setError((reason as ApiError).message ?? "We could not submit your request.");
     } finally {
@@ -230,17 +254,48 @@ export function IntakeForm({ onCreated }: { onCreated: (lead: Lead) => void }) {
               Attach supporting PDFs <span className="font-normal text-muted">(optional)</span>
             </span>
             <input
-              name="attachments"
               type="file"
               accept="application/pdf,.pdf"
               multiple
+              onChange={addAttachments}
               className="field-input file:mr-3 file:rounded-lg file:border-0 file:bg-mint file:px-3 file:py-2 file:text-xs file:font-semibold file:text-forest"
             />
           </label>
           <p className="mt-2 text-xs leading-5 text-muted">
-            Add documents that may help the reviewing legal team. Attachments are linked to your
-            lead and remain with it if it becomes a case.
+            Add one or more PDFs. You can reopen the picker to add more without replacing
+            earlier selections. Each file can be up to 25 MB.
           </p>
+          {selectedAttachments.length > 0 && (
+            <ul className="mt-3 space-y-2" aria-label="Selected PDF attachments">
+              {selectedAttachments.map((file, index) => (
+                <li
+                  key={`${file.name}:${file.size}:${file.lastModified}`}
+                  className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm"
+                >
+                  <Paperclip size={14} className="shrink-0 text-forest" />
+                  <span className="min-w-0 flex-1 truncate text-ink">
+                    {file.name}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted">
+                    {(file.size / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${file.name}`}
+                    disabled={busy}
+                    onClick={() =>
+                      setSelectedAttachments((current) =>
+                        current.filter((_, fileIndex) => fileIndex !== index),
+                      )
+                    }
+                    className="rounded-md p-1 text-muted hover:bg-canvas hover:text-ink disabled:opacity-50"
+                  >
+                    <X size={15} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         {error && <InlineMessage tone="error">{error}</InlineMessage>}
         {attachmentError && <InlineMessage tone="error">{attachmentError}</InlineMessage>}

@@ -25,11 +25,13 @@ export function DocumentExchange({
   onUploaded,
   allowUpload = true,
   showCaseRetentionNote = true,
+  showOriginalLeadAttachments = true,
 }: {
   caseRecord: CaseRecord;
   onUploaded?: (document: DocumentRecord) => void;
   allowUpload?: boolean;
   showCaseRetentionNote?: boolean;
+  showOriginalLeadAttachments?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -226,7 +228,8 @@ export function DocumentExchange({
         )}
       </div>
 
-      {(attachments.length > 0 || caseRecord.lead.attachments.length > 0) && (
+      {showOriginalLeadAttachments &&
+        (attachments.length > 0 || caseRecord.lead.attachments.length > 0) && (
         <div className="mt-5 border-t border-line pt-4">
           <h4 className="text-sm font-semibold text-ink">Original lead attachments</h4>
           <ul className="mt-2 divide-y divide-line">

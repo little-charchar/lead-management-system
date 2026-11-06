@@ -52,6 +52,13 @@ def test_lead_pdfs_are_shared_with_assigned_firm_and_remain_after_acceptance(
         assert downloaded.status_code == 200
         assert downloaded.content.startswith(b"%PDF-")
 
+    admin_download = client.get(
+        f"/api/leads/{lead_id}/attachments/{attachment['id']}",
+        user=str(baseline["admin_email"]),
+    )
+    assert admin_download.status_code == 200
+    assert admin_download.content.startswith(b"%PDF-")
+
     accepted = client.post(f"/api/leads/{lead_id}/accept", user=firm_staff)
     assert accepted.status_code == 201, accepted.text
     assert accepted.json()["lead"]["attachments"][0]["id"] == attachment["id"]

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Download,
+  Eye,
   FileSearch,
   Search,
   UserRoundCog,
@@ -11,6 +12,7 @@ import {
 
 import {
   api,
+  openPdfPreview,
   type ApiError,
   type CaseListRecord,
   type CaseRecord,
@@ -654,10 +656,12 @@ export function GlobalDirectory({
                       {selectedLead.description}
                     </p>
                   </Card>
-                  {selectedLead.status !== "ACCEPTED" && (
-                    <Card className="p-5">
+                  <Card className="p-5">
                       <h3 className="text-sm font-bold text-ink">
-                        Supporting PDFs ({selectedLead.attachments.length})
+                        {selectedLead.status === "ACCEPTED"
+                          ? "Original lead attachments"
+                          : "Supporting PDFs"}{" "}
+                        ({selectedLead.attachments.length})
                       </h3>
                       {selectedLead.attachments.length === 0 ? (
                         <p className="mt-3 text-sm text-muted">
@@ -668,6 +672,22 @@ export function GlobalDirectory({
                           {selectedLead.attachments.map((file) => (
                             <li key={file.id} className="flex items-center gap-2 text-sm">
                               <span className="min-w-0 flex-1 truncate text-ink">{file.file_name}</span>
+                              <button
+                                type="button"
+                                aria-label={`Preview ${file.file_name}`}
+                                className="rounded-lg p-2 text-forest hover:bg-mint"
+                                onClick={async () => {
+                                  try {
+                                    await openPdfPreview(() =>
+                                      api.downloadLeadAttachment(selectedLead.id, file.id),
+                                    );
+                                  } catch (reason) {
+                                    setError((reason as ApiError).message ?? "Attachment preview failed.");
+                                  }
+                                }}
+                              >
+                                <Eye size={16} />
+                              </button>
                               <button
                                 type="button"
                                 aria-label={`Download ${file.file_name}`}
@@ -692,8 +712,7 @@ export function GlobalDirectory({
                           ))}
                         </ul>
                       )}
-                    </Card>
-                  )}
+                  </Card>
                   {selectedLead.status === "ACCEPTED" && (
                     loadingLeadCase ? (
                       <p className="text-sm text-muted">Loading associated case…</p>
@@ -701,6 +720,7 @@ export function GlobalDirectory({
                       <CaseDetails
                         record={showingLeadCase}
                         firms={firms}
+                        showOriginalLeadAttachments={false}
                       />
                     ) : null
                   )}
@@ -762,7 +782,15 @@ export function GlobalDirectory({
   );
 }
 
-function CaseDetails({ record, firms }: { record: CaseRecord; firms: LawFirm[] }) {
+function CaseDetails({
+  record,
+  firms,
+  showOriginalLeadAttachments = true,
+}: {
+  record: CaseRecord;
+  firms: LawFirm[];
+  showOriginalLeadAttachments?: boolean;
+}) {
   return (
     <>
       <Card className="p-5">
@@ -802,6 +830,7 @@ function CaseDetails({ record, firms }: { record: CaseRecord; firms: LawFirm[] }
         caseRecord={record}
         allowUpload={false}
         showCaseRetentionNote={false}
+        showOriginalLeadAttachments={showOriginalLeadAttachments}
       />
       <Card className="p-5">
         <h3 className="text-sm font-bold text-ink">Historical private notes · all firms</h3>

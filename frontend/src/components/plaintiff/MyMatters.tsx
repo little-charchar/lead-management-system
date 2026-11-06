@@ -5,6 +5,8 @@ import type { ReactNode } from "react";
 import {
   Briefcase,
   Clock3,
+  Download,
+  Eye,
   FileCheck2,
   FolderOpen,
   Search,
@@ -13,6 +15,7 @@ import {
 
 import {
   api,
+  openPdfPreview,
   type ApiError,
   type CaseListRecord,
   type CaseRecord,
@@ -352,6 +355,94 @@ export function MyMatters({ refreshKey = 0 }: { refreshKey?: number }) {
                   {selectedLead.description}
                 </p>
               </Card>
+
+              {!selectedCase && (
+                <Card className="p-5">
+                  <h3 className="text-sm font-bold text-ink">
+                    Original lead attachments
+                  </h3>
+                  {selectedLead.attachments.length > 0 ? (
+                    <ul className="mt-2 divide-y divide-line">
+                      {selectedLead.attachments.map((attachment) => (
+                        <li
+                          key={attachment.id}
+                          className="flex items-center gap-3 py-3"
+                        >
+                          <FileCheck2
+                            size={17}
+                            className="shrink-0 text-forest"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-ink">
+                              {attachment.file_name}
+                            </p>
+                            <p className="mt-1 text-[11px] text-muted">
+                              {(attachment.file_size_bytes / 1024).toFixed(0)} KB
+                              {" · "}
+                              {new Date(attachment.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            aria-label={`Preview ${attachment.file_name}`}
+                            className="rounded-lg p-2 text-forest hover:bg-mint"
+                            onClick={async () => {
+                              try {
+                                await openPdfPreview(() =>
+                                  api.downloadLeadAttachment(
+                                    selectedLead.id,
+                                    attachment.id,
+                                  ),
+                                );
+                              } catch (reason) {
+                                setError(
+                                  (reason as ApiError).message ??
+                                    "The PDF could not be previewed.",
+                                );
+                              }
+                            }}
+                          >
+                            <Eye size={17} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Download ${attachment.file_name}`}
+                            className="rounded-lg p-2 text-muted hover:bg-canvas hover:text-forest"
+                            onClick={async () => {
+                              try {
+                                const blob = await api.downloadLeadAttachment(
+                                  selectedLead.id,
+                                  attachment.id,
+                                );
+                                const url = URL.createObjectURL(blob);
+                                const anchor = window.document.createElement("a");
+                                anchor.href = url;
+                                anchor.download = attachment.file_name;
+                                anchor.click();
+                                window.setTimeout(
+                                  () => URL.revokeObjectURL(url),
+                                  1_000,
+                                );
+                              } catch (reason) {
+                                setError(
+                                  (reason as ApiError).message ??
+                                    "The PDF could not be downloaded.",
+                                );
+                              }
+                            }}
+                          >
+                            <Download size={17} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-2 text-sm text-muted">
+                      No files were attached to this lead.
+                    </p>
+                  )}
+                </Card>
+              )}
 
               {selectedCase ? (
                 <>
