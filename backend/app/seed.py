@@ -1,11 +1,14 @@
-"""Reset the application schema and load representative development data.
+"""Load representative development data, optionally resetting the schema.
 
 Run from the backend directory with ``python -m app.seed``. This command drops
 and recreates all tables managed by the application's SQLAlchemy metadata.
+Pass ``--if-empty`` to preserve existing data and only seed an empty database.
 """
 
+import argparse
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import Base, SessionLocal, engine
@@ -164,14 +167,27 @@ def seed_database(db: Session) -> None:
     )
 
 
-def main() -> None:
-    """Drop and recreate the application schema, then load seed data."""
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+def main(*, if_empty: bool = False) -> None:
+    """Reset and seed the schema, or seed only when it has no users."""
+    if if_empty:
+        with SessionLocal() as db:
+            if db.scalar(select(User.id).limit(1)) is not None:
+                print("Database already contains users; preserving existing data.")
+                return
+    else:
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)
+
     with SessionLocal.begin() as db:
         seed_database(db)
     print("Database reset and seeded successfully.")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--if-empty",
+        action="store_true",
+        help="seed only when the database has no users; do not reset existing tables",
+    )
+    main(if_empty=parser.parse_args().if_empty)

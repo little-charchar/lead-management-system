@@ -26,7 +26,8 @@ same dynamically configured database URL as the application.
 Run `python -m app.seed` from `backend/` to reset the tables declared in the
 application metadata and load development personas and sample records. This is
 destructive to those tables; do not point it at a database containing data you
-need to keep.
+need to keep. The container startup uses `python -m app.seed --if-empty`, which
+preserves data and migration-created indexes on subsequent starts.
 
 ## Run the API
 

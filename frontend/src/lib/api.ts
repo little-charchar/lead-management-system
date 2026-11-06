@@ -144,8 +144,12 @@ export interface PageResult<T> {
   total: number;
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+const configuredApiUrl = (
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+).replace(/\/+$/, "");
+const API_BASE_URL = configuredApiUrl.endsWith("/api")
+  ? configuredApiUrl
+  : `${configuredApiUrl}/api`;
 
 let activePersonaEmail: string | null = "jane@plaintiff.com";
 
